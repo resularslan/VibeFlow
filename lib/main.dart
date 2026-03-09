@@ -15,7 +15,7 @@ class MyApp extends StatelessWidget {
       child: MaterialApp(
         title: 'My Music App',
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 1, 196, 225)),
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1DB954)),
         ),
         home: MyHomePage(),
       ),
@@ -60,7 +60,7 @@ class _MyHomePageState extends State<MyHomePage> {
               selectedIndex = index;
             });
           },
-          indicatorColor: const Color.fromARGB(255, 1, 196, 225),
+          indicatorColor: const Color.fromARGB(255, 29, 185, 84),
           selectedIndex: selectedIndex,
           destinations: const <Widget>[
             NavigationDestination(
@@ -78,11 +78,9 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         ),
         body:
-              Expanded(
-                child: Container(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  child: page,
-                ),
+              Container(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: page,
               ),
         );
       },
@@ -113,45 +111,45 @@ class SearchPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    var materialApp = MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(title: const Text('Search'), centerTitle: true,),
-        body: Padding(
+    return Padding(
           padding: const EdgeInsets.all(8.0),
-          child: SearchAnchor(
-            builder: (BuildContext context, SearchController controller) {
-              return SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: SearchBar(
-                  hintText: "What do you want to listen?",
-                  controller: controller,
-                  padding: const WidgetStatePropertyAll<EdgeInsets>(
-                    EdgeInsets.symmetric(horizontal: 16.0),
-                  ),
-                  onTap: () {
-                    controller.openView();
-                  },
-                  onChanged: (_) {
-                    controller.openView();
-                  },
-                  leading: const Icon(Icons.search),
-                ),
-              );
-            },
-            suggestionsBuilder: (BuildContext context, SearchController controller) {
-              return List<ListTile>.generate(10, (int index) {
-                final String item = 'item $index';
-                return ListTile(
-                  title: Text(item),
-                );
-              });
-            },
+          child: Column(
+            children: [
+              const Text("Search Everything", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              SearchAnchor(
+                builder: (BuildContext context, SearchController controller) {
+                  return SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: SearchBar(
+                      hintText: "What do you want to listen?",
+                      controller: controller,
+                      padding: const WidgetStatePropertyAll<EdgeInsets>(
+                        EdgeInsets.symmetric(horizontal: 16.0),
+                      ),
+                      onTap: () {
+                        controller.openView();
+                      },
+                      onChanged: (_) {
+                        controller.openView();
+                      },
+                      leading: const Icon(Icons.search),
+                    ),
+                  );
+                },
+                suggestionsBuilder: (BuildContext context, SearchController controller) {
+                  return List<ListTile>.generate(10, (int index) {
+                    final String item = 'item $index';
+                    return ListTile(
+                      title: Text(item),
+                    );
+                  });
+                },
+              ),
+            ],
           ),
-        ),
-      ),
-    );
-    return SafeArea(child: materialApp);
+        );
   }
 }
 
