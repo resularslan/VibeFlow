@@ -1,0 +1,64 @@
+1. Adım: Dart Dilinin Temellerine Hızlıca Göz At (1-2 Gün)
+C++ ve Python bildiğin için Dart sana çok tanıdık gelecektir; çünkü Dart, C tarzı bir syntax kullanır ve Nesne Yönelimli Programlamayı (OOP) destekler.
+
+Odaklanman gerekenler: Sınıflar (Classes), Null Safety (?, !, late gibi işaretler), ve en önemlisi Asenkron Programlama (Future, async, await). Müzik indireceğin veya internetten veri çekeceğin için asenkron yapıları çok kullanacaksın.
+
+2. Adım: Flutter'ın Mantığını Kavramak İçin Kısa Bir Tutorial (1-2 Hafta)
+Projeye direkt dalarsan, hangi Widget'ın ne işe yaradığını bilmediğin için çok bunalırsın. Sadece temel yapı taşlarını öğrenmek için bir kurs veya YouTube serisi izlemelisin.
+
+Öğrenmen gereken temel Legolar: Scaffold, Container, Row, Column, ListView.
+
+State Mantığı: StatelessWidget (değişmeyen ekranlar) ve StatefulWidget (kullanıcı etkileşimiyle değişen ekranlar, örn: Play/Pause butonu).
+
+3. Adım: Projeyi Parçalara Ayırarak Geliştirme (Asıl Öğrenme Evresi)
+Tutorial cehennemine düşmemek için temel bilgileri alır almaz kendi projene başlamalısın. Ancak Spotify klonu gibi bir projeyi tek seferde yapmaya çalışmak yerine mikro-projelere bölmelisin:
+
+Arayüz (UI) Tasarımı: Uygulamanın sadece görselini yap. Alt menü (Bottom Navigation Bar), şarkı listesi, oynatma ekranı. Arkada hiçbir kod veya müzik çalışmasın. Sadece Legoları diz.
+
+Basit State Yönetimi: Play butonuna basınca ikon Pause'a dönsün. Şarkı listesinde bir şarkıya tıklayınca seçili görünsün.
+
+Yerel Müzik Çalma: İnterneti şimdilik unut. Telefonun içine koyduğun 2-3 tane mp3 dosyasını Flutter'da audioplayers veya just_audio gibi hazır paketler kullanarak çalmayı dene. Arkada (background) müzik çalma olayının Flutter'daki en zorlu konulardan biri olduğunu unutma.
+
+Veri Çekme (Asıl Zorluk): YouTube'dan arama yapma ve dönen sonuçları listeleme kısmını entegre et.
+
+
+
+----------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+1. Aşama: UI'ı Unut, Terminale Dön (Core/Logic Katmanı)
+Flutter'da arayüz çizmeden önce veri akışını halletmek, senin teknik geçmişine en uygun başlangıçtır.
+
+Boş bir Flutter projesi aç ama ekrana hiçbir şey çizme (varsayılan sayacın kodlarını silebilirsin).
+
+Projeye youtube_explode_dart paketini dahil et.
+
+Koda statik bir YouTube linki ver.
+
+Videonun başlığını, kanal adını ve en önemlisi sadece ses (audio-only) stream URL'sini çekip terminale (print ile) yazdır.
+
+2. Aşama: Ses Motorunu Kurma (Service Katmanı)
+Elde ettiğin o çıplak ses URL'sini çalacak sağlam bir motora ihtiyacın var.
+
+Projeye just_audio paketini kur (URL üzerinden streaming konusunda en stabil paketlerden biridir).
+
+İlk aşamada bulduğun ses URL'sini bu motora besle.
+
+Ekrana sadece tasarımına hiç özenilmemiş, devasa bir "Play" ve "Pause" butonu koy. Basınca sesin geldiğinden emin ol.
+
+3. Aşama: Arama Motoru ve Arayüz (UI Katmanı)
+Artık sistemin kalbi atıyor. Şimdi işi dinamikleştirme ve o devasa "hazır objeler" (Widget) dünyasına girme vakti.
+
+Ekrana bir TextField (Arama çubuğu) ekle.
+
+Kullanıcının girdiği kelimeyi youtube_explode_dart'ın arama (search) fonksiyonuna gönder.
+
+Dönen sonuçları (Kapak fotoğrafı thumbnail, şarkı adı, süre) bir ListView.builder ile alt alta güzelce listele.
+
+4. Aşama: State Management (Durum Yönetimi)
+Bu aşama uygulamanın profesyonelleştiği yerdir. Şarkı aratıldığında dönen bir "Yükleniyor" (CircularProgressIndicator) animasyonu göstermek veya şarkı çalarken ilerleme çubuğunun (Slider) akmasını sağlamak gerekecek.
+
+Başlangıçta Flutter'ın en temel yapısı olan setState ile ekranı güncellemeyi öğren.
+
+Mantığı kavradıktan sonra, kodlarının "spagetti" olmaması için verileri arayüzden ayıran Provider paketiyle tanış.
