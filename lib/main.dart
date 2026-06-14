@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:just_audio/just_audio.dart'; // YENİ EKLENDİ
+import 'package:just_audio/just_audio.dart';
 
 void main() {
   runApp(const MyApp());
@@ -34,18 +34,34 @@ class MyApp extends StatelessWidget {
 }
 
 class MyAppState extends ChangeNotifier {
-  // --- Arama Geçmişi Yönetimi ---
   final List<String> _searchHistory = [];
-  List<String> get searchHistory => _searchHistory;
+  List<String> _searchResults = [];
 
-  void addToHistory(String query) {
-    if (query.isNotEmpty && !_searchHistory.contains(query)) {
-      _searchHistory.insert(0, query);
-      notifyListeners();
+  List<String> get searchHistory => _searchHistory;
+  List<String> get searchResults => _searchResults;
+
+  void performSearch(String query) {
+    if (query.isNotEmpty) {
+      if (!_searchHistory.contains(query)) {
+        _searchHistory.insert(0, query);
+      }
+      
+      _searchResults = [
+        '$query - Orijinal Versiyon',
+        '$query - Akustik',
+        '$query - Canlı Performans',
+        '$query - Remix',
+        '$query - Enstrümantal',
+      ];
+      notifyListeners(); 
     }
   }
 
-  // --- Ses Oynatıcı (Audio Player) Yönetimi ---
+  void clearSearchResults() {
+    _searchResults = [];
+    notifyListeners();
+  }
+
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
   
@@ -56,12 +72,9 @@ class MyAppState extends ChangeNotifier {
   }
 
   Future<void> _initAudio() async {
-    // Telifsiz, test amaçlı bir müzik URL'si kullanıyoruz
     const url = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
     try {
       await _audioPlayer.setUrl(url);
-      
-      // Şarkının çalıp çalmadığını (durumunu) dinliyoruz
       _audioPlayer.playerStateStream.listen((playerState) {
         final isPlaying = playerState.playing;
         final processingState = playerState.processingState;
@@ -112,7 +125,7 @@ class _MyHomePageState extends State<MyHomePage> {
         page = const HomePage();
         break;
       case 1:
-        page = const SearchPage();
+        page = const SearchPage(); // SearchPage artık Stateful
         break;
       case 2:
         page = const LibraryPage();
@@ -164,7 +177,6 @@ class MiniPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // appState üzerinden state verilerini dinliyoruz
     var appState = context.watch<MyAppState>();
 
     return Container(
@@ -211,14 +223,12 @@ class MiniPlayer extends StatelessWidget {
             ),
           ),
           IconButton(
-            // Şarkı çalıyorsa duraklatma (pause), çalmıyorsa oynatma (play) ikonu gösteriyoruz
             icon: Icon(
               appState.isPlaying ? Icons.pause : Icons.play_arrow, 
               color: Colors.white, 
               size: 32
             ),
             onPressed: () {
-              // Butona basıldığında togglePlay metodunu tetikliyoruz
               appState.togglePlay();
             },
           ),
@@ -321,8 +331,23 @@ class HomePage extends StatelessWidget {
   }
 }
 
-class SearchPage extends StatelessWidget {
+// GÜNCELLENEN KISIM: Arama Sayfası artık tam ekran katmanı açmıyor
+class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  // Arama çubuğundaki metni kontrol etmek için
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -335,86 +360,98 @@ class SearchPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              "Search", 
+              "Arama", 
               style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)
             ),
             const SizedBox(height: 16),
-            SearchAnchor(
-              builder: (BuildContext context, SearchController controller) {
-                return SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: SearchBar(
-                    hintText: "What do you want to listen to?",
-                    hintStyle: WidgetStatePropertyAll<TextStyle>(
-                      TextStyle(color: Colors.grey[400])
-                    ),
-                    backgroundColor: WidgetStatePropertyAll<Color>(
-                      Colors.white.withOpacity(0.1)
-                    ),
-                    controller: controller,
-                    padding: const WidgetStatePropertyAll<EdgeInsets>(
-                      EdgeInsets.symmetric(horizontal: 16.0),
-                    ),
-                    onTap: () {
-                      controller.openView();
-                    },
-                    onChanged: (value) {
-                      controller.openView();
-                    },
-                    onSubmitted: (value) {
-                      appState.addToHistory(value);
-                      controller.closeView(value);
-                    },
-                    leading: const Icon(Icons.search, color: Colors.grey),
-                  ),
-                );
-              },
-              suggestionsBuilder: (BuildContext context, SearchController controller) {
-                return appState.searchHistory.map((String item) {
-                  return ListTile(
-                    leading: const Icon(Icons.history),
-                    title: Text(item),
-                    onTap: () {
-                      controller.closeView(item);
-                    },
-                  );
-                }).toList();
-              },
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              "Browse All", 
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: GridView.builder(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 1.5,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
+            
+            // SearchAnchor yerine doğrudan SearchBar kullanıyoruz
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: SearchBar(
+                controller: _searchController,
+                hintText: "Ne dinlemek istiyorsun?",
+                hintStyle: WidgetStatePropertyAll<TextStyle>(
+                  TextStyle(color: Colors.grey[400]!)
                 ),
-                itemCount: 8,
-                itemBuilder: (context, index) {
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: Colors.primaries[index % Colors.primaries.length].withOpacity(0.8),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: const EdgeInsets.all(12),
-                    child: Text(
-                      'Category ${index + 1}',
-                      style: const TextStyle(
-                        fontSize: 18, 
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white
-                      ),
-                    ),
-                  );
+                backgroundColor: WidgetStatePropertyAll<Color>(
+                  Colors.white.withOpacity(0.1)
+                ),
+                padding: const WidgetStatePropertyAll<EdgeInsets>(
+                  const EdgeInsets.symmetric(horizontal: 16.0),
+                ),
+                leading: const Icon(Icons.search, color: Colors.grey),
+                
+                // Metin varsa sağ tarafta (X) silme butonu göster
+                trailing: _searchController.text.isNotEmpty
+                    ? [
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey),
+                          onPressed: () {
+                            _searchController.clear();
+                            appState.clearSearchResults();
+                            setState(() {}); // Çarpı butonunu gizlemek için arayüzü yenile
+                          },
+                        )
+                      ]
+                    : null,
+                
+                // Klavyede Enter'a basıldığında aramayı tetikle
+                onSubmitted: (value) {
+                  appState.performSearch(value);
+                },
+                
+                // Yazı yazıldıkça Çarpı butonunun gelmesi için
+                onChanged: (value) {
+                  setState(() {}); 
+                  if (value.isEmpty) {
+                    appState.clearSearchResults();
+                  }
                 },
               ),
+            ),
+            const SizedBox(height: 24),
+            
+            Expanded(
+              child: appState.searchResults.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.search_off, size: 64, color: Colors.grey[800]),
+                          const SizedBox(height: 16),
+                          Text(
+                            "Aramak istediğiniz şarkıyı yazın.",
+                            style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: appState.searchResults.length,
+                      itemBuilder: (context, index) {
+                        final result = appState.searchResults[index];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(vertical: 4.0),
+                          leading: Container(
+                            width: 48,
+                            height: 48,
+                            color: Colors.grey[800],
+                            child: const Icon(Icons.music_note, color: Colors.white),
+                          ),
+                          title: Text(
+                            result,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: const Text("Şarkı"),
+                          trailing: const Icon(Icons.play_arrow, color: Colors.grey),
+                          onTap: () {
+                            debugPrint("$result seçildi");
+                          },
+                        );
+                      },
+                    ),
             ),
           ],
         ),
