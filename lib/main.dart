@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:hive_flutter/hive_flutter.dart'; // YENİ: Hive eklendi
+import 'package:hive_flutter/hive_flutter.dart';
 
 void main() async {
-  // YENİ: Uygulama başlamadan önce Hive veritabanını başlatıyoruz
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
-  await Hive.openBox('libraryBox'); // libraryBox adında bir yerel veritabanı kutusu aç
+  await Hive.openBox('libraryBox');
 
   runApp(const MyApp());
 }
@@ -40,34 +39,60 @@ class MyApp extends StatelessWidget {
 }
 
 class MyAppState extends ChangeNotifier {
-  // --- Çalma Listesi (Library/Hive) Yönetimi ---
   final _libraryBox = Hive.box('libraryBox');
   List<String> _playlists = [];
+  
+  // YENİ: İndirilen şarkıları takip edeceğimiz listeler ve durumlar
+  List<String> _downloads = [];
+  bool _isDownloading = false;
 
   List<String> get playlists => _playlists;
+  List<String> get downloads => _downloads;
+  bool get isDownloading => _isDownloading;
 
   MyAppState() {
     _initAudio();
-    _loadPlaylists(); // Uygulama açıldığında kayıtlı listeleri yükle
+    _loadData();
   }
 
-  void _loadPlaylists() {
-    // Hive'dan 'playlists' anahtarıyla veriyi çek, yoksa boş liste döndür
+  void _loadData() {
     final savedPlaylists = _libraryBox.get('playlists', defaultValue: <String>[]);
     _playlists = List<String>.from(savedPlaylists);
+
+    // YENİ: Uygulama açıldığında indirilen şarkıları veritabanından çek
+    final savedDownloads = _libraryBox.get('downloads', defaultValue: <String>[]);
+    _downloads = List<String>.from(savedDownloads);
+    
     notifyListeners();
   }
 
   void addPlaylist(String name) {
-    // Liste adı boş değilse ve daha önce eklenmemişse kaydet
     if (name.isNotEmpty && !_playlists.contains(name)) {
       _playlists.add(name);
-      _libraryBox.put('playlists', _playlists); // Hive'a kalıcı olarak yaz
+      _libraryBox.put('playlists', _playlists);
       notifyListeners();
     }
   }
 
-  // --- Arama ve Sonuç Yönetimi ---
+  // YENİ: Çevrimdışı dinleme için indirme simülasyonu
+  Future<void> downloadCurrentSong() async {
+    const currentSongName = 'Test Şarkısı (SoundHelix)';
+    
+    if (!_downloads.contains(currentSongName)) {
+      _isDownloading = true;
+      notifyListeners();
+
+      // İndirme işlemi sürüyormuş gibi 2 saniye bekle (Ağ simülasyonu)
+      await Future.delayed(const Duration(seconds: 2));
+
+      _downloads.add(currentSongName);
+      _libraryBox.put('downloads', _downloads); // Kalıcı hafızaya kaydet
+      
+      _isDownloading = false;
+      notifyListeners();
+    }
+  }
+
   final List<String> _searchHistory = [];
   List<String> _searchResults = [];
 
@@ -79,7 +104,6 @@ class MyAppState extends ChangeNotifier {
       if (!_searchHistory.contains(query)) {
         _searchHistory.insert(0, query);
       }
-      
       _searchResults = [
         '$query - Orijinal Versiyon',
         '$query - Akustik',
@@ -96,7 +120,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Ses Oynatıcı Yönetimi ---
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
   
@@ -209,6 +232,9 @@ class MiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
+    
+    // Şarkının indirilip indirilmediğini kontrol ediyoruz
+    final isDownloaded = appState.downloads.contains('Test Şarkısı (SoundHelix)');
 
     return Container(
       height: 64,
@@ -231,9 +257,9 @@ class MiniPlayer extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
-                Text(
-                  'Test Şarkısı (Online)',
+              children: [
+                const Text(
+                  'Test Şarkısı (SoundHelix)',
                   style: TextStyle(
                     color: Colors.white, 
                     fontWeight: FontWeight.bold,
@@ -242,17 +268,43 @@ class MiniPlayer extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
+                // İndirilme durumuna göre Çevrimiçi/Çevrimdışı yazısı değişir
                 Text(
-                  'Çevrimiçi',
+                  isDownloaded ? 'Çevrimdışı (İndirildi)' : 'Çevrimiçi',
                   style: TextStyle(
-                    color: Colors.grey, 
+                    color: isDownloaded ? const Color(0xFF1DB954) : Colors.grey, 
                     fontSize: 12,
+                    fontWeight: isDownloaded ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
               ],
             ),
           ),
+          
+          // YENİ: İndirme Butonu
+          if (appState.isDownloading)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2),
+              ),
+            )
+          else if (isDownloaded)
+            const IconButton(
+              icon: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 28),
+              onPressed: null, // Zaten indirildiyse tıklanamaz
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey, size: 28),
+              onPressed: () {
+                appState.downloadCurrentSong();
+              },
+            ),
+
           IconButton(
             icon: Icon(
               appState.isPlaying ? Icons.pause : Icons.play_arrow, 
@@ -480,7 +532,6 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
-// GÜNCELLENEN KISIM: Kütüphane Sayfası artık dinamik veri okuyor
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
 
@@ -507,7 +558,6 @@ class LibraryPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           
-          // Yeni Çalma Listesi Ekleme Butonu
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(
@@ -518,7 +568,6 @@ class LibraryPage extends StatelessWidget {
             ),
             title: const Text('Yeni Çalma Listesi Oluştur'),
             onTap: () {
-              // Butona tıklanınca açılacak olan pencere (Dialog)
               showDialog(
                 context: context,
                 builder: (context) {
@@ -539,16 +588,15 @@ class LibraryPage extends StatelessWidget {
                           borderSide: BorderSide(color: Color(0xFF1DB954)),
                         ),
                       ),
-                      autofocus: true, // Açılır açılmaz klavyeyi getir
+                      autofocus: true,
                     ),
                     actions: [
                       TextButton(
-                        onPressed: () => Navigator.pop(context), // Pencereyi kapat
+                        onPressed: () => Navigator.pop(context),
                         child: const Text('İptal', style: TextStyle(color: Colors.grey)),
                       ),
                       TextButton(
                         onPressed: () {
-                          // appState üzerinden Hive'a kaydet ve pencereyi kapat
                           appState.addPlaylist(controller.text);
                           Navigator.pop(context);
                         },
@@ -561,24 +609,23 @@ class LibraryPage extends StatelessWidget {
             },
           ),
           
-          // Sabit Beğenilen Şarkılar Listesi
+          // YENİ EKLENEN KISIM: İndirilen Şarkılar
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(
               width: 50,
               height: 50,
               color: const Color(0xFF1DB954),
-              child: const Icon(Icons.favorite, color: Colors.white),
+              child: const Icon(Icons.download_done, color: Colors.white),
             ),
-            title: const Text('Beğenilen Şarkılar'),
-            subtitle: const Text('Otomatik Liste'),
+            title: const Text('İndirilen Şarkılar'),
+            subtitle: Text('${appState.downloads.length} şarkı • Çevrimdışı hazır'),
           ),
 
           const SizedBox(height: 16),
           const Divider(color: Colors.black),
           const SizedBox(height: 16),
           
-          // Kullanıcının Oluşturduğu Kalıcı Çalma Listeleri
           ...appState.playlists.map((playlistName) => ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(
