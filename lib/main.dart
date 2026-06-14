@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,17 +39,26 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// En üste eklenecek yeni import:
+// import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+
+// MyAppState'in güncellenmiş hali:
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
   List<String> _playlists = [];
   
-  // YENİ: İndirilen şarkıları takip edeceğimiz listeler ve durumlar
   List<String> _downloads = [];
   bool _isDownloading = false;
 
   List<String> get playlists => _playlists;
   List<String> get downloads => _downloads;
   bool get isDownloading => _isDownloading;
+
+  // --- YENİ: YouTube Arama ve Ses Motoru Altyapısı ---
+  final YoutubeExplode _yt = YoutubeExplode(); // YouTube'a bağlanan ana motor
+  bool _isSearching = false; // Arama yapılıp yapılmadığını takip eden değişken
+  
+  bool get isSearching => _isSearching;
 
   MyAppState() {
     _initAudio();
@@ -59,7 +69,6 @@ class MyAppState extends ChangeNotifier {
     final savedPlaylists = _libraryBox.get('playlists', defaultValue: <String>[]);
     _playlists = List<String>.from(savedPlaylists);
 
-    // YENİ: Uygulama açıldığında indirilen şarkıları veritabanından çek
     final savedDownloads = _libraryBox.get('downloads', defaultValue: <String>[]);
     _downloads = List<String>.from(savedDownloads);
     
@@ -74,7 +83,6 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  // YENİ: Çevrimdışı dinleme için indirme simülasyonu
   Future<void> downloadCurrentSong() async {
     const currentSongName = 'Test Şarkısı (SoundHelix)';
     
@@ -82,11 +90,10 @@ class MyAppState extends ChangeNotifier {
       _isDownloading = true;
       notifyListeners();
 
-      // İndirme işlemi sürüyormuş gibi 2 saniye bekle (Ağ simülasyonu)
       await Future.delayed(const Duration(seconds: 2));
 
       _downloads.add(currentSongName);
-      _libraryBox.put('downloads', _downloads); // Kalıcı hafızaya kaydet
+      _libraryBox.put('downloads', _downloads); 
       
       _isDownloading = false;
       notifyListeners();
@@ -94,24 +101,39 @@ class MyAppState extends ChangeNotifier {
   }
 
   final List<String> _searchHistory = [];
-  List<String> _searchResults = [];
+  
+  // YENİ: Arama sonuçları artık basit bir String (metin) listesi değil.
+  // Her bir sonuç bir video (şarkı) nesnesi olacak. Bu yüzden liste tipini 'dynamic' yaptık.
+  List<dynamic> _searchResults = []; 
 
   List<String> get searchHistory => _searchHistory;
-  List<String> get searchResults => _searchResults;
+  List<dynamic> get searchResults => _searchResults; // Güncellendi
 
-  void performSearch(String query) {
+  // YENİ: YouTube üzerinden gerçek arama yapan fonksiyon
+  Future<void> performSearch(String query) async {
     if (query.isNotEmpty) {
       if (!_searchHistory.contains(query)) {
         _searchHistory.insert(0, query);
       }
-      _searchResults = [
-        '$query - Orijinal Versiyon',
-        '$query - Akustik',
-        '$query - Canlı Performans',
-        '$query - Remix',
-        '$query - Enstrümantal',
-      ];
-      notifyListeners(); 
+      
+      // Kullanıcıya arama yapıldığını göstermek için UI'ı yükleme moduna geçir
+      _isSearching = true; 
+      notifyListeners();
+
+      try {
+        // YouTube'da sadece videoları (şarkıları) ara, canlı yayınları vb. hariç tut
+        var searchResult = await _yt.search.search(query, filter: TypeFilters.video);
+        
+        // Gelen devasa verinin içinden sadece bize lazım olanları (Video listesini) al ve Listeye çevir
+        _searchResults = searchResult.toList(); 
+        
+      } catch (e) {
+        debugPrint('YouTube araması sırasında hata: $e');
+        _searchResults = []; // Hata olursa sonuçları boşalt
+      } finally {
+        _isSearching = false; // Arama bitti, UI'ı normal moda döndür
+        notifyListeners(); 
+      }
     }
   }
 
@@ -157,6 +179,7 @@ class MyAppState extends ChangeNotifier {
   @override
   void dispose() {
     _audioPlayer.dispose();
+    _yt.close(); // YENİ: Uygulama kapanırken YouTube motorunu da kapat ki bellek sızıntısı olmasın
     super.dispose();
   }
 }
