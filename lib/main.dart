@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:just_audio/just_audio.dart'; // YENİ EKLENDİ
 
 void main() {
   runApp(const MyApp());
@@ -33,8 +34,8 @@ class MyApp extends StatelessWidget {
 }
 
 class MyAppState extends ChangeNotifier {
+  // --- Arama Geçmişi Yönetimi ---
   final List<String> _searchHistory = [];
-
   List<String> get searchHistory => _searchHistory;
 
   void addToHistory(String query) {
@@ -42,6 +43,54 @@ class MyAppState extends ChangeNotifier {
       _searchHistory.insert(0, query);
       notifyListeners();
     }
+  }
+
+  // --- Ses Oynatıcı (Audio Player) Yönetimi ---
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlaying = false;
+  
+  bool get isPlaying => _isPlaying;
+
+  MyAppState() {
+    _initAudio();
+  }
+
+  Future<void> _initAudio() async {
+    // Telifsiz, test amaçlı bir müzik URL'si kullanıyoruz
+    const url = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
+    try {
+      await _audioPlayer.setUrl(url);
+      
+      // Şarkının çalıp çalmadığını (durumunu) dinliyoruz
+      _audioPlayer.playerStateStream.listen((playerState) {
+        final isPlaying = playerState.playing;
+        final processingState = playerState.processingState;
+        
+        if (processingState == ProcessingState.completed) {
+          _isPlaying = false;
+          notifyListeners();
+        } else {
+          _isPlaying = isPlaying;
+          notifyListeners();
+        }
+      });
+    } catch (e) {
+      debugPrint("Ses yüklenirken hata oluştu: $e");
+    }
+  }
+
+  void togglePlay() {
+    if (_isPlaying) {
+      _audioPlayer.pause();
+    } else {
+      _audioPlayer.play();
+    }
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
   }
 }
 
@@ -73,11 +122,10 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     return Scaffold(
-      // Sayfa içeriği ve Mini Player'ı alt alta diziyoruz
       body: Column(
         children: [
-          Expanded(child: page), // Hangi sayfadaysak o sayfa tüm boşluğu kaplar
-          const MiniPlayer(),    // Alt kısımda Mini Player her zaman sabit kalır
+          Expanded(child: page),
+          const MiniPlayer(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -111,23 +159,24 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-// YENİ EKLENEN: Uygulamanın her yerinde görünecek Mini Player bileşeni
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // appState üzerinden state verilerini dinliyoruz
+    var appState = context.watch<MyAppState>();
+
     return Container(
       height: 64,
-      decoration: BoxDecoration(
-        color: Colors.grey[900], // Hafif daha açık bir siyah
+      decoration: const BoxDecoration(
+        color: Color(0xFF181818), 
         border: Border(
-          bottom: BorderSide(color: Colors.black, width: 1), // Navbar ile arasına ince bir çizgi
+          bottom: BorderSide(color: Colors.black, width: 1), 
         ),
       ),
       child: Row(
         children: [
-          // Sol taraf: Şarkı ikonu veya resmi
           Container(
             width: 64,
             height: 64,
@@ -135,14 +184,13 @@ class MiniPlayer extends StatelessWidget {
             child: const Icon(Icons.music_note, color: Colors.white, size: 32),
           ),
           const SizedBox(width: 12),
-          // Orta kısım: Şarkı bilgisi (Sadeleştirilmiş yapı)
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: const [
                 Text(
-                  'Henüz Bir Şarkı Seçilmedi',
+                  'Test Şarkısı (Online)',
                   style: TextStyle(
                     color: Colors.white, 
                     fontWeight: FontWeight.bold,
@@ -153,7 +201,7 @@ class MiniPlayer extends StatelessWidget {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'Çevrimiçi / Çevrimdışı',
+                  'Çevrimiçi',
                   style: TextStyle(
                     color: Colors.grey, 
                     fontSize: 12,
@@ -162,12 +210,16 @@ class MiniPlayer extends StatelessWidget {
               ],
             ),
           ),
-          // Sağ taraf: Kontrol Butonu
           IconButton(
-            icon: const Icon(Icons.play_arrow, color: Colors.white, size: 32),
+            // Şarkı çalıyorsa duraklatma (pause), çalmıyorsa oynatma (play) ikonu gösteriyoruz
+            icon: Icon(
+              appState.isPlaying ? Icons.pause : Icons.play_arrow, 
+              color: Colors.white, 
+              size: 32
+            ),
             onPressed: () {
-              // TODO: İlerleyen görevlerde buraya just_audio Play/Pause mantığı eklenecek
-              debugPrint("Play butonuna basıldı");
+              // Butona basıldığında togglePlay metodunu tetikliyoruz
+              appState.togglePlay();
             },
           ),
           const SizedBox(width: 8),
@@ -176,8 +228,6 @@ class MiniPlayer extends StatelessWidget {
     );
   }
 }
-
-// ... Aşağıdaki kısımlar (HomePage, SearchPage, LibraryPage) önceki kodla birebir aynı ...
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
