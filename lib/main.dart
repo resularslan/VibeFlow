@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart'; // YouTube motoru
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,14 +39,9 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// En üste eklenecek yeni import:
-// import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-
-// MyAppState'in güncellenmiş hali:
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
   List<String> _playlists = [];
-  
   List<String> _downloads = [];
   bool _isDownloading = false;
 
@@ -54,9 +49,8 @@ class MyAppState extends ChangeNotifier {
   List<String> get downloads => _downloads;
   bool get isDownloading => _isDownloading;
 
-  // --- YENİ: YouTube Arama ve Ses Motoru Altyapısı ---
-  final YoutubeExplode _yt = YoutubeExplode(); // YouTube'a bağlanan ana motor
-  bool _isSearching = false; // Arama yapılıp yapılmadığını takip eden değişken
+  final YoutubeExplode _yt = YoutubeExplode();
+  bool _isSearching = false;
   
   bool get isSearching => _isSearching;
 
@@ -101,37 +95,28 @@ class MyAppState extends ChangeNotifier {
   }
 
   final List<String> _searchHistory = [];
-  
-  // YENİ: Arama sonuçları artık basit bir String (metin) listesi değil.
-  // Her bir sonuç bir video (şarkı) nesnesi olacak. Bu yüzden liste tipini 'dynamic' yaptık.
   List<dynamic> _searchResults = []; 
 
   List<String> get searchHistory => _searchHistory;
-  List<dynamic> get searchResults => _searchResults; // Güncellendi
+  List<dynamic> get searchResults => _searchResults;
 
-  // YENİ: YouTube üzerinden gerçek arama yapan fonksiyon
   Future<void> performSearch(String query) async {
     if (query.isNotEmpty) {
       if (!_searchHistory.contains(query)) {
         _searchHistory.insert(0, query);
       }
       
-      // Kullanıcıya arama yapıldığını göstermek için UI'ı yükleme moduna geçir
       _isSearching = true; 
       notifyListeners();
 
       try {
-        // YouTube'da sadece videoları (şarkıları) ara, canlı yayınları vb. hariç tut
         var searchResult = await _yt.search.search(query, filter: TypeFilters.video);
-        
-        // Gelen devasa verinin içinden sadece bize lazım olanları (Video listesini) al ve Listeye çevir
         _searchResults = searchResult.toList(); 
-        
       } catch (e) {
         debugPrint('YouTube araması sırasında hata: $e');
-        _searchResults = []; // Hata olursa sonuçları boşalt
+        _searchResults = []; 
       } finally {
-        _isSearching = false; // Arama bitti, UI'ı normal moda döndür
+        _isSearching = false; 
         notifyListeners(); 
       }
     }
@@ -179,7 +164,7 @@ class MyAppState extends ChangeNotifier {
   @override
   void dispose() {
     _audioPlayer.dispose();
-    _yt.close(); // YENİ: Uygulama kapanırken YouTube motorunu da kapat ki bellek sızıntısı olmasın
+    _yt.close(); 
     super.dispose();
   }
 }
@@ -255,8 +240,6 @@ class MiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
-    
-    // Şarkının indirilip indirilmediğini kontrol ediyoruz
     final isDownloaded = appState.downloads.contains('Test Şarkısı (SoundHelix)');
 
     return Container(
@@ -292,7 +275,6 @@ class MiniPlayer extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                // İndirilme durumuna göre Çevrimiçi/Çevrimdışı yazısı değişir
                 Text(
                   isDownloaded ? 'Çevrimdışı (İndirildi)' : 'Çevrimiçi',
                   style: TextStyle(
@@ -305,7 +287,6 @@ class MiniPlayer extends StatelessWidget {
             ),
           ),
           
-          // YENİ: İndirme Butonu
           if (appState.isDownloading)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0),
@@ -318,7 +299,7 @@ class MiniPlayer extends StatelessWidget {
           else if (isDownloaded)
             const IconButton(
               icon: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 28),
-              onPressed: null, // Zaten indirildiyse tıklanamaz
+              onPressed: null, 
             )
           else
             IconButton(
@@ -340,6 +321,150 @@ class MiniPlayer extends StatelessWidget {
           ),
           const SizedBox(width: 8),
         ],
+      ),
+    );
+  }
+}
+
+// GÜNCELLENEN KISIM: Arama Sayfası (Gerçek Veriler)
+class SearchPage extends StatefulWidget {
+  const SearchPage({super.key});
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var appState = context.watch<MyAppState>();
+    
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Arama", 
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: SearchBar(
+                controller: _searchController,
+                hintText: "Ne dinlemek istiyorsun?",
+                hintStyle: WidgetStatePropertyAll<TextStyle>(
+                  TextStyle(color: Colors.grey[400]!)
+                ),
+                backgroundColor: WidgetStatePropertyAll<Color>(
+                  Colors.white.withOpacity(0.1)
+                ),
+                padding: const WidgetStatePropertyAll<EdgeInsets>(
+                  const EdgeInsets.symmetric(horizontal: 16.0),
+                ),
+                leading: const Icon(Icons.search, color: Colors.grey),
+                trailing: _searchController.text.isNotEmpty
+                    ? [
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey),
+                          onPressed: () {
+                            _searchController.clear();
+                            appState.clearSearchResults();
+                            setState(() {}); 
+                          },
+                        )
+                      ]
+                    : null,
+                onSubmitted: (value) {
+                  // Arama butonuna basıldığında klavyeyi kapat ve aramayı başlat
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  appState.performSearch(value);
+                },
+                onChanged: (value) {
+                  setState(() {}); 
+                  if (value.isEmpty) {
+                    appState.clearSearchResults();
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Sonuçları Gösteren Alan
+            Expanded(
+              child: appState.isSearching 
+                  // 1. Durum: Arama yapılıyorsa yükleniyor animasyonu göster
+                  ? const Center(
+                      child: CircularProgressIndicator(color: Color(0xFF1DB954)),
+                    )
+                  // 2. Durum: Sonuç boşsa varsayılan metni göster
+                  : appState.searchResults.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.search_off, size: 64, color: Colors.grey[800]),
+                              const SizedBox(height: 16),
+                              Text(
+                                "Aramak istediğiniz şarkıyı yazın.",
+                                style: TextStyle(color: Colors.grey[500], fontSize: 16),
+                              ),
+                            ],
+                          ),
+                        )
+                      // 3. Durum: YouTube'dan veri geldiyse listele
+                      : ListView.builder(
+                          itemCount: appState.searchResults.length,
+                          itemBuilder: (context, index) {
+                            final video = appState.searchResults[index];
+                            
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
+                              // YENİ: YouTube kapak fotoğrafı
+                              leading: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: Image.network(
+                                  video.thumbnails.lowResUrl, 
+                                  width: 64, 
+                                  height: 48, 
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    width: 64, height: 48, color: Colors.grey[800],
+                                    child: const Icon(Icons.music_note),
+                                  ),
+                                ),
+                              ),
+                              // YENİ: YouTube Video Başlığı
+                              title: Text(
+                                video.title,
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              // YENİ: Kanal Adı
+                              subtitle: Text(video.author, maxLines: 1),
+                              trailing: const Icon(Icons.play_arrow, color: Colors.grey),
+                              onTap: () {
+                                // Tıklanma olayı Görev 8'de buraya eklenecek!
+                                debugPrint("Seçilen şarkı ID'si: ${video.id}");
+                              },
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -437,124 +562,6 @@ class HomePage extends StatelessWidget {
   }
 }
 
-class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
-
-  @override
-  State<SearchPage> createState() => _SearchPageState();
-}
-
-class _SearchPageState extends State<SearchPage> {
-  final TextEditingController _searchController = TextEditingController();
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    var appState = context.watch<MyAppState>();
-    
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Arama", 
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: SearchBar(
-                controller: _searchController,
-                hintText: "Ne dinlemek istiyorsun?",
-                hintStyle: WidgetStatePropertyAll<TextStyle>(
-                  TextStyle(color: Colors.grey[400]!)
-                ),
-                backgroundColor: WidgetStatePropertyAll<Color>(
-                  Colors.white.withOpacity(0.1)
-                ),
-                padding: const WidgetStatePropertyAll<EdgeInsets>(
-                  const EdgeInsets.symmetric(horizontal: 16.0),
-                ),
-                leading: const Icon(Icons.search, color: Colors.grey),
-                trailing: _searchController.text.isNotEmpty
-                    ? [
-                        IconButton(
-                          icon: const Icon(Icons.clear, color: Colors.grey),
-                          onPressed: () {
-                            _searchController.clear();
-                            appState.clearSearchResults();
-                            setState(() {}); 
-                          },
-                        )
-                      ]
-                    : null,
-                onSubmitted: (value) {
-                  appState.performSearch(value);
-                },
-                onChanged: (value) {
-                  setState(() {}); 
-                  if (value.isEmpty) {
-                    appState.clearSearchResults();
-                  }
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: appState.searchResults.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.search_off, size: 64, color: Colors.grey[800]),
-                          const SizedBox(height: 16),
-                          Text(
-                            "Aramak istediğiniz şarkıyı yazın.",
-                            style: TextStyle(color: Colors.grey[500], fontSize: 16),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: appState.searchResults.length,
-                      itemBuilder: (context, index) {
-                        final result = appState.searchResults[index];
-                        return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(vertical: 4.0),
-                          leading: Container(
-                            width: 48,
-                            height: 48,
-                            color: Colors.grey[800],
-                            child: const Icon(Icons.music_note, color: Colors.white),
-                          ),
-                          title: Text(
-                            result,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: const Text("Şarkı"),
-                          trailing: const Icon(Icons.play_arrow, color: Colors.grey),
-                          onTap: () {
-                            debugPrint("$result seçildi");
-                          },
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
 
@@ -632,7 +639,6 @@ class LibraryPage extends StatelessWidget {
             },
           ),
           
-          // YENİ EKLENEN KISIM: İndirilen Şarkılar
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(
