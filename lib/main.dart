@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:hive_flutter/hive_flutter.dart'; // YENİ: Hive eklendi
 
-void main() {
+void main() async {
+  // YENİ: Uygulama başlamadan önce Hive veritabanını başlatıyoruz
+  WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
+  await Hive.openBox('libraryBox'); // libraryBox adında bir yerel veritabanı kutusu aç
+
   runApp(const MyApp());
 }
 
@@ -34,6 +40,34 @@ class MyApp extends StatelessWidget {
 }
 
 class MyAppState extends ChangeNotifier {
+  // --- Çalma Listesi (Library/Hive) Yönetimi ---
+  final _libraryBox = Hive.box('libraryBox');
+  List<String> _playlists = [];
+
+  List<String> get playlists => _playlists;
+
+  MyAppState() {
+    _initAudio();
+    _loadPlaylists(); // Uygulama açıldığında kayıtlı listeleri yükle
+  }
+
+  void _loadPlaylists() {
+    // Hive'dan 'playlists' anahtarıyla veriyi çek, yoksa boş liste döndür
+    final savedPlaylists = _libraryBox.get('playlists', defaultValue: <String>[]);
+    _playlists = List<String>.from(savedPlaylists);
+    notifyListeners();
+  }
+
+  void addPlaylist(String name) {
+    // Liste adı boş değilse ve daha önce eklenmemişse kaydet
+    if (name.isNotEmpty && !_playlists.contains(name)) {
+      _playlists.add(name);
+      _libraryBox.put('playlists', _playlists); // Hive'a kalıcı olarak yaz
+      notifyListeners();
+    }
+  }
+
+  // --- Arama ve Sonuç Yönetimi ---
   final List<String> _searchHistory = [];
   List<String> _searchResults = [];
 
@@ -62,14 +96,11 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Ses Oynatıcı Yönetimi ---
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
   
   bool get isPlaying => _isPlaying;
-
-  MyAppState() {
-    _initAudio();
-  }
 
   Future<void> _initAudio() async {
     const url = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
@@ -125,7 +156,7 @@ class _MyHomePageState extends State<MyHomePage> {
         page = const HomePage();
         break;
       case 1:
-        page = const SearchPage(); // SearchPage artık Stateful
+        page = const SearchPage();
         break;
       case 2:
         page = const LibraryPage();
@@ -331,7 +362,6 @@ class HomePage extends StatelessWidget {
   }
 }
 
-// GÜNCELLENEN KISIM: Arama Sayfası artık tam ekran katmanı açmıyor
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
 
@@ -340,7 +370,6 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
-  // Arama çubuğundaki metni kontrol etmek için
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -364,8 +393,6 @@ class _SearchPageState extends State<SearchPage> {
               style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)
             ),
             const SizedBox(height: 16),
-            
-            // SearchAnchor yerine doğrudan SearchBar kullanıyoruz
             SizedBox(
               width: double.infinity,
               height: 50,
@@ -382,8 +409,6 @@ class _SearchPageState extends State<SearchPage> {
                   const EdgeInsets.symmetric(horizontal: 16.0),
                 ),
                 leading: const Icon(Icons.search, color: Colors.grey),
-                
-                // Metin varsa sağ tarafta (X) silme butonu göster
                 trailing: _searchController.text.isNotEmpty
                     ? [
                         IconButton(
@@ -391,18 +416,14 @@ class _SearchPageState extends State<SearchPage> {
                           onPressed: () {
                             _searchController.clear();
                             appState.clearSearchResults();
-                            setState(() {}); // Çarpı butonunu gizlemek için arayüzü yenile
+                            setState(() {}); 
                           },
                         )
                       ]
                     : null,
-                
-                // Klavyede Enter'a basıldığında aramayı tetikle
                 onSubmitted: (value) {
                   appState.performSearch(value);
                 },
-                
-                // Yazı yazıldıkça Çarpı butonunun gelmesi için
                 onChanged: (value) {
                   setState(() {}); 
                   if (value.isEmpty) {
@@ -412,7 +433,6 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
             const SizedBox(height: 24),
-            
             Expanded(
               child: appState.searchResults.isEmpty
                   ? Center(
@@ -460,11 +480,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
+// GÜNCELLENEN KISIM: Kütüphane Sayfası artık dinamik veri okuyor
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    var appState = context.watch<MyAppState>();
+
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.all(16.0),
@@ -477,12 +500,14 @@ class LibraryPage extends StatelessWidget {
               ),
               SizedBox(width: 16),
               Text(
-                "Your Library", 
+                "Kütüphanen", 
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)
               ),
             ],
           ),
           const SizedBox(height: 24),
+          
+          // Yeni Çalma Listesi Ekleme Butonu
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(
@@ -491,8 +516,52 @@ class LibraryPage extends StatelessWidget {
               color: Colors.grey[800],
               child: const Icon(Icons.add),
             ),
-            title: const Text('Add New Playlist'),
+            title: const Text('Yeni Çalma Listesi Oluştur'),
+            onTap: () {
+              // Butona tıklanınca açılacak olan pencere (Dialog)
+              showDialog(
+                context: context,
+                builder: (context) {
+                  final TextEditingController controller = TextEditingController();
+                  return AlertDialog(
+                    backgroundColor: Colors.grey[900],
+                    title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)),
+                    content: TextField(
+                      controller: controller,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Liste adı',
+                        hintStyle: TextStyle(color: Colors.grey[500]),
+                        enabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: const Color(0xFF1DB954).withOpacity(0.5)),
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
+                          borderSide: BorderSide(color: Color(0xFF1DB954)),
+                        ),
+                      ),
+                      autofocus: true, // Açılır açılmaz klavyeyi getir
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context), // Pencereyi kapat
+                        child: const Text('İptal', style: TextStyle(color: Colors.grey)),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          // appState üzerinden Hive'a kaydet ve pencereyi kapat
+                          appState.addPlaylist(controller.text);
+                          Navigator.pop(context);
+                        },
+                        child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954))),
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
           ),
+          
+          // Sabit Beğenilen Şarkılar Listesi
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(
@@ -501,9 +570,27 @@ class LibraryPage extends StatelessWidget {
               color: const Color(0xFF1DB954),
               child: const Icon(Icons.favorite, color: Colors.white),
             ),
-            title: const Text('Liked Songs'),
-            subtitle: const Text('Playlist • 120 songs'),
+            title: const Text('Beğenilen Şarkılar'),
+            subtitle: const Text('Otomatik Liste'),
           ),
+
+          const SizedBox(height: 16),
+          const Divider(color: Colors.black),
+          const SizedBox(height: 16),
+          
+          // Kullanıcının Oluşturduğu Kalıcı Çalma Listeleri
+          ...appState.playlists.map((playlistName) => ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Container(
+              width: 50,
+              height: 50,
+              color: Colors.grey[850],
+              child: const Icon(Icons.queue_music, color: Colors.white),
+            ),
+            title: Text(playlistName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Çalma Listesi'),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+          )).toList(),
         ],
       ),
     );
