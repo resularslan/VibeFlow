@@ -73,7 +73,13 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     return Scaffold(
-      body: page,
+      // Sayfa içeriği ve Mini Player'ı alt alta diziyoruz
+      body: Column(
+        children: [
+          Expanded(child: page), // Hangi sayfadaysak o sayfa tüm boşluğu kaplar
+          const MiniPlayer(),    // Alt kısımda Mini Player her zaman sabit kalır
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         onDestinationSelected: (int index) {
           setState(() {
@@ -105,6 +111,74 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
+// YENİ EKLENEN: Uygulamanın her yerinde görünecek Mini Player bileşeni
+class MiniPlayer extends StatelessWidget {
+  const MiniPlayer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 64,
+      decoration: BoxDecoration(
+        color: Colors.grey[900], // Hafif daha açık bir siyah
+        border: Border(
+          bottom: BorderSide(color: Colors.black, width: 1), // Navbar ile arasına ince bir çizgi
+        ),
+      ),
+      child: Row(
+        children: [
+          // Sol taraf: Şarkı ikonu veya resmi
+          Container(
+            width: 64,
+            height: 64,
+            color: Colors.grey[850],
+            child: const Icon(Icons.music_note, color: Colors.white, size: 32),
+          ),
+          const SizedBox(width: 12),
+          // Orta kısım: Şarkı bilgisi (Sadeleştirilmiş yapı)
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Text(
+                  'Henüz Bir Şarkı Seçilmedi',
+                  style: TextStyle(
+                    color: Colors.white, 
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Çevrimiçi / Çevrimdışı',
+                  style: TextStyle(
+                    color: Colors.grey, 
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Sağ taraf: Kontrol Butonu
+          IconButton(
+            icon: const Icon(Icons.play_arrow, color: Colors.white, size: 32),
+            onPressed: () {
+              // TODO: İlerleyen görevlerde buraya just_audio Play/Pause mantığı eklenecek
+              debugPrint("Play butonuna basıldı");
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+}
+
+// ... Aşağıdaki kısımlar (HomePage, SearchPage, LibraryPage) önceki kodla birebir aynı ...
+
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -121,7 +195,6 @@ class HomePage extends StatelessWidget {
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            // Mock Playlist Grid
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
@@ -161,7 +234,6 @@ class HomePage extends StatelessWidget {
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            // Mock Horizontal List
             SizedBox(
               height: 180,
               child: ListView.builder(
