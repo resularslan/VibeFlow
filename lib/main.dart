@@ -1,8 +1,10 @@
+import 'dart:io'; // YENİ: Dosya işlemleri için
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart'; // YouTube motoru
+import 'package:path_provider/path_provider.dart'; // YENİ: Telefon hafızası için
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,8 +53,10 @@ class MyAppState extends ChangeNotifier {
 
   final YoutubeExplode _yt = YoutubeExplode();
   bool _isSearching = false;
-  
+  bool _isAudioLoading = false; // YENİ: Şarkı indirilirken yükleniyor durumu
+
   bool get isSearching => _isSearching;
+  bool get isAudioLoading => _isAudioLoading;
 
   MyAppState() {
     _initAudio();
@@ -77,19 +81,14 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
+  // Kalıcı indirme butonu mantığı (Kütüphane için)
   Future<void> downloadCurrentSong() async {
-    const currentSongName = 'Test Şarkısı (SoundHelix)';
+    if (_currentSong == null) return;
+    final songTitle = _currentSong.title;
     
-    if (!_downloads.contains(currentSongName)) {
-      _isDownloading = true;
-      notifyListeners();
-
-      await Future.delayed(const Duration(seconds: 2));
-
-      _downloads.add(currentSongName);
+    if (!_downloads.contains(songTitle)) {
+      _downloads.add(songTitle);
       _libraryBox.put('downloads', _downloads); 
-      
-      _isDownloading = false;
       notifyListeners();
     }
   }
@@ -129,27 +128,77 @@ class MyAppState extends ChangeNotifier {
 
   final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isPlaying = false;
-  
+  dynamic _currentSong; 
+
   bool get isPlaying => _isPlaying;
+  dynamic get currentSong => _currentSong;
 
   Future<void> _initAudio() async {
-    const url = 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3';
+    _audioPlayer.playerStateStream.listen((playerState) {
+      _isPlaying = playerState.playing;
+      notifyListeners();
+    });
+  }
+
+  // DEVRİMSEL DEĞİŞİKLİK: YouTube Engelini Yok Eden İndir-Çal Metodu
+  Future<void> playSong(dynamic video) async {
+    File? file;
+    IOSink? fileStream;
+    
     try {
-      await _audioPlayer.setUrl(url);
-      _audioPlayer.playerStateStream.listen((playerState) {
-        final isPlaying = playerState.playing;
-        final processingState = playerState.processingState;
+      _currentSong = video;
+      _isAudioLoading = true;
+      notifyListeners();
+
+      var manifest = await _yt.videos.streamsClient.getManifest(video.id);
+      
+      // DEĞİŞİKLİK 1: En yüksek kaliteyi değil, en düşük dosya boyutunu (ilk Muxed) alıyoruz.
+      // Bu sayede 30-40 MB yerine 3-5 MB indireceğiz, saniyeler sürecek!
+      if (manifest.muxed.isEmpty) throw Exception("Uygun akış bulunamadı.");
+      var streamInfo = manifest.muxed.first; 
+      
+      var tempDir = await getTemporaryDirectory();
+      String filePath = '${tempDir.path}/${video.id}.mp4';
+      file = File(filePath);
+
+      // Eğer dosya yoksa veya yarım kalıp 0 byte olduysa indir
+      if (!await file.exists() || await file.length() == 0) {
+        debugPrint("Şarkı indiriliyor (Zaman aşımı korumalı)...");
+        var stream = _yt.videos.streamsClient.get(streamInfo);
+        fileStream = file.openWrite();
+
+        // DEĞİŞİKLİK 2: 30 Saniye Sigortası! 
+        // 30 saniye içinde bitmezse sonsuza kadar bekleme, hata fırlat!
+        await stream.pipe(fileStream).timeout(const Duration(seconds: 30));
+        await fileStream.flush();
+        await fileStream.close();
         
-        if (processingState == ProcessingState.completed) {
-          _isPlaying = false;
-          notifyListeners();
-        } else {
-          _isPlaying = isPlaying;
-          notifyListeners();
-        }
-      });
+        debugPrint("İndirme bitti! Boyut: ${await file.length()} bytes");
+      } else {
+        debugPrint("Şarkı zaten hafızada hazır.");
+      }
+
+      await _audioPlayer.setAudioSource(AudioSource.file(filePath));
+      _audioPlayer.play();
+      
     } catch (e) {
-      debugPrint("Ses yüklenirken hata oluştu: $e");
+      debugPrint("Müzik indirme/oynatma hatası: $e");
+      
+      // Eğer indirme yarıda kesildiyse bozuk dosyayı sil (sonraki denemede baştan insin)
+      if (fileStream != null) await fileStream.close();
+      if (file != null && await file.exists()) {
+        await file.delete();
+      }
+      
+      try {
+        await _audioPlayer.setUrl('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
+        _audioPlayer.play();
+      } catch (_) {}
+      
+    } finally {
+      // Ne olursa olsun (çalışsa da, çökse de, zaman aşımına uğrasa da) yükleme animasyonunu durdur!
+      _isAudioLoading = false; 
+      notifyListeners();
     }
   }
 
@@ -240,7 +289,12 @@ class MiniPlayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
-    final isDownloaded = appState.downloads.contains('Test Şarkısı (SoundHelix)');
+    
+    final hasSong = appState.currentSong != null;
+    final songTitle = hasSong ? appState.currentSong.title : 'Henüz Şarkı Seçilmedi';
+    final thumbnailUrl = hasSong ? appState.currentSong.thumbnails.lowResUrl : null;
+    
+    final isDownloaded = appState.downloads.contains(songTitle);
 
     return Container(
       height: 64,
@@ -256,7 +310,10 @@ class MiniPlayer extends StatelessWidget {
             width: 64,
             height: 64,
             color: Colors.grey[850],
-            child: const Icon(Icons.music_note, color: Colors.white, size: 32),
+            child: hasSong
+                ? Image.network(thumbnailUrl, fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.music_note, color: Colors.white, size: 32))
+                : const Icon(Icons.music_note, color: Colors.white, size: 32),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -264,9 +321,9 @@ class MiniPlayer extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text(
-                  'Test Şarkısı (SoundHelix)',
-                  style: TextStyle(
+                Text(
+                  songTitle,
+                  style: const TextStyle(
                     color: Colors.white, 
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
@@ -276,34 +333,33 @@ class MiniPlayer extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  isDownloaded ? 'Çevrimdışı (İndirildi)' : 'Çevrimiçi',
+                  appState.isAudioLoading 
+                      ? 'Şarkı yükleniyor...' 
+                      : (isDownloaded ? 'Çevrimdışı (Kaydedildi)' : 'Çevrimiçi hazır'),
                   style: TextStyle(
-                    color: isDownloaded ? const Color(0xFF1DB954) : Colors.grey, 
+                    color: const Color(0xFF1DB954), 
                     fontSize: 12,
-                    fontWeight: isDownloaded ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
           ),
           
-          if (appState.isDownloading)
+          // Şarkı yükleniyorsa/indiriliyorsa mini player'da küçük bir yükleniyor dairesi dönsün
+          if (appState.isAudioLoading)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0),
               child: SizedBox(
-                width: 24,
-                height: 24,
+                width: 20,
+                height: 20,
                 child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2),
               ),
             )
-          else if (isDownloaded)
-            const IconButton(
-              icon: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 28),
-              onPressed: null, 
-            )
-          else
+          else if (hasSong)
             IconButton(
-              icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey, size: 28),
+              icon: Icon(isDownloaded ? Icons.offline_pin : Icons.download_for_offline_outlined, 
+                  color: isDownloaded ? const Color(0xFF1DB954) : Colors.grey, size: 28),
               onPressed: () {
                 appState.downloadCurrentSong();
               },
@@ -315,9 +371,9 @@ class MiniPlayer extends StatelessWidget {
               color: Colors.white, 
               size: 32
             ),
-            onPressed: () {
+            onPressed: (hasSong && !appState.isAudioLoading) ? () {
               appState.togglePlay();
-            },
+            } : null,
           ),
           const SizedBox(width: 8),
         ],
@@ -326,7 +382,6 @@ class MiniPlayer extends StatelessWidget {
   }
 }
 
-// GÜNCELLENEN KISIM: Arama Sayfası (Gerçek Veriler)
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
 
@@ -387,7 +442,6 @@ class _SearchPageState extends State<SearchPage> {
                       ]
                     : null,
                 onSubmitted: (value) {
-                  // Arama butonuna basıldığında klavyeyi kapat ve aramayı başlat
                   FocusManager.instance.primaryFocus?.unfocus();
                   appState.performSearch(value);
                 },
@@ -401,14 +455,11 @@ class _SearchPageState extends State<SearchPage> {
             ),
             const SizedBox(height: 24),
             
-            // Sonuçları Gösteren Alan
             Expanded(
               child: appState.isSearching 
-                  // 1. Durum: Arama yapılıyorsa yükleniyor animasyonu göster
                   ? const Center(
                       child: CircularProgressIndicator(color: Color(0xFF1DB954)),
                     )
-                  // 2. Durum: Sonuç boşsa varsayılan metni göster
                   : appState.searchResults.isEmpty
                       ? Center(
                           child: Column(
@@ -423,7 +474,6 @@ class _SearchPageState extends State<SearchPage> {
                             ],
                           ),
                         )
-                      // 3. Durum: YouTube'dan veri geldiyse listele
                       : ListView.builder(
                           itemCount: appState.searchResults.length,
                           itemBuilder: (context, index) {
@@ -431,7 +481,6 @@ class _SearchPageState extends State<SearchPage> {
                             
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
-                              // YENİ: YouTube kapak fotoğrafı
                               leading: ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: Image.network(
@@ -445,19 +494,17 @@ class _SearchPageState extends State<SearchPage> {
                                   ),
                                 ),
                               ),
-                              // YENİ: YouTube Video Başlığı
                               title: Text(
                                 video.title,
                                 style: const TextStyle(fontWeight: FontWeight.bold),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              // YENİ: Kanal Adı
                               subtitle: Text(video.author, maxLines: 1),
                               trailing: const Icon(Icons.play_arrow, color: Colors.grey),
                               onTap: () {
-                                // Tıklanma olayı Görev 8'de buraya eklenecek!
-                                debugPrint("Seçilen şarkı ID'si: ${video.id}");
+                                FocusManager.instance.primaryFocus?.unfocus();
+                                appState.playSong(video);
                               },
                             );
                           },
