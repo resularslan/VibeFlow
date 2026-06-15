@@ -1,9 +1,9 @@
-import 'dart:io'; // YENİ: Dosya işlemleri için
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:path_provider/path_provider.dart'; // YENİ: Telefon hafızası için
+import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 void main() async {
@@ -44,16 +44,16 @@ class MyApp extends StatelessWidget {
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
   List<String> _playlists = [];
-  List<String> _downloads = [];
-  bool _isDownloading = false;
-
+  
+  // GÜNCELLENDİ: İndirilen şarkıları artık tüm detayları ve dosya yollarıyla (Map) tutuyoruz
+  List<Map<dynamic, dynamic>> _downloadedSongs = [];
+  
   List<String> get playlists => _playlists;
-  List<String> get downloads => _downloads;
-  bool get isDownloading => _isDownloading;
+  List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
 
   final YoutubeExplode _yt = YoutubeExplode();
   bool _isSearching = false;
-  bool _isAudioLoading = false; // YENİ: Şarkı indirilirken yükleniyor durumu
+  bool _isAudioLoading = false; 
 
   bool get isSearching => _isSearching;
   bool get isAudioLoading => _isAudioLoading;
@@ -67,8 +67,9 @@ class MyAppState extends ChangeNotifier {
     final savedPlaylists = _libraryBox.get('playlists', defaultValue: <String>[]);
     _playlists = List<String>.from(savedPlaylists);
 
-    final savedDownloads = _libraryBox.get('downloads', defaultValue: <String>[]);
-    _downloads = List<String>.from(savedDownloads);
+    // GÜNCELLENDİ: Uygulama açıldığında indirilen şarkıların detaylı listesini Hive'dan çek
+    final savedDownloads = _libraryBox.get('downloaded_songs', defaultValue: []);
+    _downloadedSongs = List<Map<dynamic, dynamic>>.from(savedDownloads);
     
     notifyListeners();
   }
@@ -77,18 +78,6 @@ class MyAppState extends ChangeNotifier {
     if (name.isNotEmpty && !_playlists.contains(name)) {
       _playlists.add(name);
       _libraryBox.put('playlists', _playlists);
-      notifyListeners();
-    }
-  }
-
-  // Kalıcı indirme butonu mantığı (Kütüphane için)
-  Future<void> downloadCurrentSong() async {
-    if (_currentSong == null) return;
-    final songTitle = _currentSong.title;
-    
-    if (!_downloads.contains(songTitle)) {
-      _downloads.add(songTitle);
-      _libraryBox.put('downloads', _downloads); 
       notifyListeners();
     }
   }
@@ -126,12 +115,14 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioPlayer _audioPlayer = Container().runtimeType == Navigator().runtimeType ? AudioPlayer() : AudioPlayer();
   bool _isPlaying = false;
-  dynamic _currentSong; 
+  
+  // GÜNCELLENDİ: Çalan şarkı yapısını standart bir Map haline getirdik
+  Map<dynamic, dynamic>? _currentSong; 
 
   bool get isPlaying => _isPlaying;
-  dynamic get currentSong => _currentSong;
+  Map<dynamic, dynamic>? get currentSong => _currentSong;
 
   Future<void> _initAudio() async {
     _audioPlayer.playerStateStream.listen((playerState) {
@@ -140,64 +131,87 @@ class MyAppState extends ChangeNotifier {
     });
   }
 
-  // DEVRİMSEL DEĞİŞİKLİK: YouTube Engelini Yok Eden İndir-Çal Metodu
-  Future<void> playSong(dynamic video) async {
+  // Çevrimiçi Arama Sayfasından Şarkı Çalma ve Arka Planda İndirme Mantığı
+  Future<void> playOnlineSong(dynamic video) async {
     File? file;
     IOSink? fileStream;
     
     try {
-      _currentSong = video;
+      // Önce şarkı bilgilerini map yapısına dönüştürerek Mini Player'a gönder
+      _currentSong = {
+        'id': video.id.value,
+        'title': video.title,
+        'author': video.author,
+        'thumbnail': video.thumbnails.lowResUrl,
+        'path': '', // Henüz indirme bitmediği için boş
+      };
       _isAudioLoading = true;
       notifyListeners();
 
       var manifest = await _yt.videos.streamsClient.getManifest(video.id);
-      
-      // DEĞİŞİKLİK 1: En yüksek kaliteyi değil, en düşük dosya boyutunu (ilk Muxed) alıyoruz.
-      // Bu sayede 30-40 MB yerine 3-5 MB indireceğiz, saniyeler sürecek!
       if (manifest.muxed.isEmpty) throw Exception("Uygun akış bulunamadı.");
       var streamInfo = manifest.muxed.first; 
       
       var tempDir = await getTemporaryDirectory();
-      String filePath = '${tempDir.path}/${video.id}.mp4';
+      String filePath = '${tempDir.path}/${video.id.value}.mp4';
       file = File(filePath);
 
-      // Eğer dosya yoksa veya yarım kalıp 0 byte olduysa indir
       if (!await file.exists() || await file.length() == 0) {
-        debugPrint("Şarkı indiriliyor (Zaman aşımı korumalı)...");
+        debugPrint("Şarkı arka planda indiriliyor...");
         var stream = _yt.videos.streamsClient.get(streamInfo);
         fileStream = file.openWrite();
 
-        // DEĞİŞİKLİK 2: 30 Saniye Sigortası! 
-        // 30 saniye içinde bitmezse sonsuza kadar bekleme, hata fırlat!
-        await stream.pipe(fileStream).timeout(const Duration(seconds: 30));
+        await stream.pipe(fileStream).timeout(const Duration(seconds: 25));
         await fileStream.flush();
         await fileStream.close();
-        
-        debugPrint("İndirme bitti! Boyut: ${await file.length()} bytes");
-      } else {
-        debugPrint("Şarkı zaten hafızada hazır.");
+      }
+
+      // GÜNCELLENDİ: İndirme başarılı olduysa, bu şarkıyı tüm detayları ve klasör yoluyla Hive'a kaydet!
+      _currentSong!['path'] = filePath;
+      
+      if (!_downloadedSongs.any((s) => s['id'] == video.id.value)) {
+        _downloadedSongs.add(_currentSong!);
+        _libraryBox.put('downloaded_songs', _downloadedSongs);
       }
 
       await _audioPlayer.setAudioSource(AudioSource.file(filePath));
       _audioPlayer.play();
       
     } catch (e) {
-      debugPrint("Müzik indirme/oynatma hatası: $e");
-      
-      // Eğer indirme yarıda kesildiyse bozuk dosyayı sil (sonraki denemede baştan insin)
+      debugPrint("Oynatma hatası, yedek plana geçiliyor: $e");
       if (fileStream != null) await fileStream.close();
-      if (file != null && await file.exists()) {
-        await file.delete();
-      }
+      if (file != null && await file.exists()) await file.delete();
       
+      // Güvenli yedek çalma
       try {
         await _audioPlayer.setUrl('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
         _audioPlayer.play();
       } catch (_) {}
-      
     } finally {
-      // Ne olursa olsun (çalışsa da, çökse de, zaman aşımına uğrasa da) yükleme animasyonunu durdur!
       _isAudioLoading = false; 
+      notifyListeners();
+    }
+  }
+
+  // GÜNCELLENDİ: Çevrimdışı (İndirilenler) Listesinden Şarkı Çalan Yeni Metod
+  // Hiçbir internet isteği atmaz, doğrudan cihazdaki fiziksel dosyayı tetikler!
+  Future<void> playOfflineSong(Map<dynamic, dynamic> song) async {
+    try {
+      _currentSong = song;
+      _isAudioLoading = true;
+      notifyListeners();
+
+      File file = File(song['path']);
+      if (await file.exists()) {
+        await _audioPlayer.setAudioSource(AudioSource.file(song['path']));
+        _audioPlayer.play();
+      } else {
+        throw Exception("Fiziksel dosya bulunamadı.");
+      }
+    } catch (e) {
+      debugPrint("Çevrimdışı çalma hatası: $e");
+    } finally {
+      _isAudioLoading = false;
       notifyListeners();
     }
   }
@@ -291,18 +305,17 @@ class MiniPlayer extends StatelessWidget {
     var appState = context.watch<MyAppState>();
     
     final hasSong = appState.currentSong != null;
-    final songTitle = hasSong ? appState.currentSong.title : 'Henüz Şarkı Seçilmedi';
-    final thumbnailUrl = hasSong ? appState.currentSong.thumbnails.lowResUrl : null;
+    final songTitle = hasSong ? appState.currentSong!['title'] : 'Henüz Şarkı Seçilmedi';
+    final thumbnailUrl = hasSong ? appState.currentSong!['thumbnail'] : null;
     
-    final isDownloaded = appState.downloads.contains(songTitle);
+    // Şarkının indirilip indirilmediğini ID kontrolüyle yapıyoruz
+    final isDownloaded = hasSong && appState.downloadedSongs.any((s) => s['id'] == appState.currentSong!['id']);
 
     return Container(
       height: 64,
       decoration: const BoxDecoration(
         color: Color(0xFF181818), 
-        border: Border(
-          bottom: BorderSide(color: Colors.black, width: 1), 
-        ),
+        border: Border(bottom: BorderSide(color: Colors.black, width: 1)),
       ),
       child: Row(
         children: [
@@ -323,57 +336,35 @@ class MiniPlayer extends StatelessWidget {
               children: [
                 Text(
                   songTitle,
-                  style: const TextStyle(
-                    color: Colors.white, 
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
                 Text(
                   appState.isAudioLoading 
-                      ? 'Şarkı yükleniyor...' 
-                      : (isDownloaded ? 'Çevrimdışı (Kaydedildi)' : 'Çevrimiçi hazır'),
-                  style: TextStyle(
-                    color: const Color(0xFF1DB954), 
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      ? 'Şarkı hazırlanıyor...' 
+                      : (isDownloaded ? 'Çevrimdışı hazır (Cihazda)' : 'Çevrimiçi akış'),
+                  style: const TextStyle(color: Color(0xFF1DB954), fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
           ),
           
-          // Şarkı yükleniyorsa/indiriliyorsa mini player'da küçük bir yükleniyor dairesi dönsün
           if (appState.isAudioLoading)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2),
-              ),
+              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2)),
             )
-          else if (hasSong)
-            IconButton(
-              icon: Icon(isDownloaded ? Icons.offline_pin : Icons.download_for_offline_outlined, 
-                  color: isDownloaded ? const Color(0xFF1DB954) : Colors.grey, size: 28),
-              onPressed: () {
-                appState.downloadCurrentSong();
-              },
+          else if (isDownloaded)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 28),
             ),
 
           IconButton(
-            icon: Icon(
-              appState.isPlaying ? Icons.pause : Icons.play_arrow, 
-              color: Colors.white, 
-              size: 32
-            ),
-            onPressed: (hasSong && !appState.isAudioLoading) ? () {
-              appState.togglePlay();
-            } : null,
+            icon: Icon(appState.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32),
+            onPressed: (hasSong && !appState.isAudioLoading) ? () => appState.togglePlay() : null,
           ),
           const SizedBox(width: 8),
         ],
@@ -408,10 +399,7 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              "Arama", 
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)
-            ),
+            const Text("Arama", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -419,27 +407,16 @@ class _SearchPageState extends State<SearchPage> {
               child: SearchBar(
                 controller: _searchController,
                 hintText: "Ne dinlemek istiyorsun?",
-                hintStyle: WidgetStatePropertyAll<TextStyle>(
-                  TextStyle(color: Colors.grey[400]!)
-                ),
-                backgroundColor: WidgetStatePropertyAll<Color>(
-                  Colors.white.withOpacity(0.1)
-                ),
-                padding: const WidgetStatePropertyAll<EdgeInsets>(
-                  const EdgeInsets.symmetric(horizontal: 16.0),
-                ),
+                hintStyle: WidgetStatePropertyAll<TextStyle>(TextStyle(color: Colors.grey[400]!)),
+                backgroundColor: WidgetStatePropertyAll<Color>(Colors.white.withOpacity(0.1)),
+                padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.symmetric(horizontal: 16.0)),
                 leading: const Icon(Icons.search, color: Colors.grey),
                 trailing: _searchController.text.isNotEmpty
-                    ? [
-                        IconButton(
-                          icon: const Icon(Icons.clear, color: Colors.grey),
-                          onPressed: () {
-                            _searchController.clear();
-                            appState.clearSearchResults();
-                            setState(() {}); 
-                          },
-                        )
-                      ]
+                    ? [IconButton(icon: const Icon(Icons.clear, color: Colors.grey), onPressed: () {
+                        _searchController.clear();
+                        appState.clearSearchResults();
+                        setState(() {}); 
+                      })]
                     : null,
                 onSubmitted: (value) {
                   FocusManager.instance.primaryFocus?.unfocus();
@@ -447,19 +424,14 @@ class _SearchPageState extends State<SearchPage> {
                 },
                 onChanged: (value) {
                   setState(() {}); 
-                  if (value.isEmpty) {
-                    appState.clearSearchResults();
-                  }
+                  if (value.isEmpty) appState.clearSearchResults();
                 },
               ),
             ),
             const SizedBox(height: 24),
-            
             Expanded(
               child: appState.isSearching 
-                  ? const Center(
-                      child: CircularProgressIndicator(color: Color(0xFF1DB954)),
-                    )
+                  ? const Center(child: CircularProgressIndicator(color: Color(0xFF1DB954)))
                   : appState.searchResults.isEmpty
                       ? Center(
                           child: Column(
@@ -467,10 +439,7 @@ class _SearchPageState extends State<SearchPage> {
                             children: [
                               Icon(Icons.search_off, size: 64, color: Colors.grey[800]),
                               const SizedBox(height: 16),
-                              Text(
-                                "Aramak istediğiniz şarkıyı yazın.",
-                                style: TextStyle(color: Colors.grey[500], fontSize: 16),
-                              ),
+                              Text("Aramak istediğiniz şarkıyı yazın.", style: TextStyle(color: Colors.grey[500], fontSize: 16)),
                             ],
                           ),
                         )
@@ -478,33 +447,21 @@ class _SearchPageState extends State<SearchPage> {
                           itemCount: appState.searchResults.length,
                           itemBuilder: (context, index) {
                             final video = appState.searchResults[index];
-                            
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
                               leading: ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: Image.network(
-                                  video.thumbnails.lowResUrl, 
-                                  width: 64, 
-                                  height: 48, 
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => Container(
-                                    width: 64, height: 48, color: Colors.grey[800],
-                                    child: const Icon(Icons.music_note),
-                                  ),
+                                  video.thumbnails.lowResUrl, width: 64, height: 48, fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Container(width: 64, height: 48, color: Colors.grey[800], child: const Icon(Icons.music_note)),
                                 ),
                               ),
-                              title: Text(
-                                video.title,
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              title: Text(video.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
                               subtitle: Text(video.author, maxLines: 1),
                               trailing: const Icon(Icons.play_arrow, color: Colors.grey),
                               onTap: () {
                                 FocusManager.instance.primaryFocus?.unfocus();
-                                appState.playSong(video);
+                                appState.playOnlineSong(video); // Online arama çalması
                               },
                             );
                           },
@@ -528,79 +485,22 @@ class HomePage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Good Evening',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
+            const Text('Good Evening', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 3,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
+              crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), childAspectRatio: 3, mainAxisSpacing: 8, crossAxisSpacing: 8,
               children: List.generate(6, (index) {
                 return Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
                   child: Row(
                     children: [
-                      Container(
-                        width: 56,
-                        color: Colors.grey[800],
-                        child: const Icon(Icons.music_note),
-                      ),
+                      Container(width: 56, color: Colors.grey[800], child: const Icon(Icons.music_note)),
                       const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Playlist ${index + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                      Expanded(child: Text('Playlist ${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                     ],
                   ),
                 );
               }),
-            ),
-            const SizedBox(height: 32),
-            const Text(
-              'Made for You',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 180,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: 5,
-                itemBuilder: (context, index) {
-                  return Container(
-                    width: 140,
-                    margin: const EdgeInsets.only(right: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          height: 140,
-                          width: 140,
-                          color: Colors.grey[800],
-                          child: const Icon(Icons.album, size: 50),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Daily Mix ${index + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
             ),
           ],
         ),
@@ -609,6 +509,7 @@ class HomePage extends StatelessWidget {
   }
 }
 
+// GÜNCELLENDİ: Kütüphane Sayfası artık fiziksel olarak indirilen şarkıları listeliyor ve internetsiz çalabiliyor
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
 
@@ -622,27 +523,16 @@ class LibraryPage extends StatelessWidget {
         children: [
           Row(
             children: const [
-              CircleAvatar(
-                backgroundColor: Colors.grey,
-                child: Icon(Icons.person, color: Colors.white),
-              ),
+              CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.person, color: Colors.white)),
               SizedBox(width: 16),
-              Text(
-                "Kütüphanen", 
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)
-              ),
+              Text("Kütüphanen", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 24),
           
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Container(
-              width: 50,
-              height: 50,
-              color: Colors.grey[800],
-              child: const Icon(Icons.add),
-            ),
+            leading: Container(width: 50, height: 50, color: Colors.grey[800], child: const Icon(Icons.add)),
             title: const Text('Yeni Çalma Listesi Oluştur'),
             onTap: () {
               showDialog(
@@ -653,32 +543,17 @@ class LibraryPage extends StatelessWidget {
                     backgroundColor: Colors.grey[900],
                     title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)),
                     content: TextField(
-                      controller: controller,
-                      style: const TextStyle(color: Colors.white),
+                      controller: controller, style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: 'Liste adı',
-                        hintStyle: TextStyle(color: Colors.grey[500]),
-                        enabledBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: const Color(0xFF1DB954).withOpacity(0.5)),
-                        ),
-                        focusedBorder: const UnderlineInputBorder(
-                          borderSide: BorderSide(color: Color(0xFF1DB954)),
-                        ),
+                        hintText: 'Liste adı', hintStyle: TextStyle(color: Colors.grey[500]),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: const Color(0xFF1DB954).withOpacity(0.5))),
+                        focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF1DB954))),
                       ),
                       autofocus: true,
                     ),
                     actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('İptal', style: TextStyle(color: Colors.grey)),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          appState.addPlaylist(controller.text);
-                          Navigator.pop(context);
-                        },
-                        child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954))),
-                      ),
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal', style: TextStyle(color: Colors.grey))),
+                      TextButton(onPressed: () { appState.addPlaylist(controller.text); Navigator.pop(context); }, child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954)))),
                     ],
                   );
                 },
@@ -688,32 +563,38 @@ class LibraryPage extends StatelessWidget {
           
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Container(
-              width: 50,
-              height: 50,
-              color: const Color(0xFF1DB954),
-              child: const Icon(Icons.download_done, color: Colors.white),
-            ),
+            leading: Container(width: 50, height: 50, color: const Color(0xFF1DB954), child: const Icon(Icons.download_done, color: Colors.white)),
             title: const Text('İndirilen Şarkılar'),
-            subtitle: Text('${appState.downloads.length} şarkı • Çevrimdışı hazır'),
+            subtitle: Text('${appState.downloadedSongs.length} şarkı • Çevrimdışı hazır'),
           ),
 
           const SizedBox(height: 16),
           const Divider(color: Colors.black),
-          const SizedBox(height: 16),
           
-          ...appState.playlists.map((playlistName) => ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Container(
-              width: 50,
-              height: 50,
-              color: Colors.grey[850],
-              child: const Icon(Icons.queue_music, color: Colors.white),
-            ),
-            title: Text(playlistName, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: const Text('Çalma Listesi'),
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-          )).toList(),
+          if (appState.downloadedSongs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                "Henüz indirilen şarkı yok.", 
+                style: TextStyle(color: Colors.grey[600]), 
+                textAlign: TextAlign.center
+              ),
+            )
+          else
+            ...appState.downloadedSongs.map((song) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.music_note))),
+              ),
+              title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(song['author'], maxLines: 1),
+              trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954)),
+              onTap: () {
+                appState.playOfflineSong(song);
+              },
+            )).toList(),
         ],
       ),
     );
