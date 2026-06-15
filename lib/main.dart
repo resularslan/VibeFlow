@@ -1,10 +1,11 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+import 'package:http/http.dart' as http;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,19 +45,32 @@ class MyApp extends StatelessWidget {
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
   List<String> _playlists = [];
-  
-  // GÜNCELLENDİ: İndirilen şarkıları artık tüm detayları ve dosya yollarıyla (Map) tutuyoruz
   List<Map<dynamic, dynamic>> _downloadedSongs = [];
   
   List<String> get playlists => _playlists;
   List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
 
-  final YoutubeExplode _yt = YoutubeExplode();
+  // PYTHON BACKEND ADRESİMİZ (Android Emülatör köprü IP'si)
+  final String _backendUrl = "http://10.0.2.2:8000";
+
   bool _isSearching = false;
   bool _isAudioLoading = false; 
 
   bool get isSearching => _isSearching;
   bool get isAudioLoading => _isAudioLoading;
+
+  final List<String> _searchHistory = [];
+  List<dynamic> _searchResults = []; 
+
+  List<String> get searchHistory => _searchHistory;
+  List<dynamic> get searchResults => _searchResults;
+
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlaying = false;
+  Map<dynamic, dynamic>? _currentSong; 
+
+  bool get isPlaying => _isPlaying;
+  Map<dynamic, dynamic>? get currentSong => _currentSong;
 
   MyAppState() {
     _initAudio();
@@ -67,7 +81,6 @@ class MyAppState extends ChangeNotifier {
     final savedPlaylists = _libraryBox.get('playlists', defaultValue: <String>[]);
     _playlists = List<String>.from(savedPlaylists);
 
-    // GÜNCELLENDİ: Uygulama açıldığında indirilen şarkıların detaylı listesini Hive'dan çek
     final savedDownloads = _libraryBox.get('downloaded_songs', defaultValue: []);
     _downloadedSongs = List<Map<dynamic, dynamic>>.from(savedDownloads);
     
@@ -82,31 +95,33 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  final List<String> _searchHistory = [];
-  List<dynamic> _searchResults = []; 
-
-  List<String> get searchHistory => _searchHistory;
-  List<dynamic> get searchResults => _searchResults;
-
+  // YENİ: Python sunucusuna istek atarak arama yapma
   Future<void> performSearch(String query) async {
-    if (query.isNotEmpty) {
-      if (!_searchHistory.contains(query)) {
-        _searchHistory.insert(0, query);
-      }
-      
-      _isSearching = true; 
-      notifyListeners();
+    if (query.isEmpty) return;
 
-      try {
-        var searchResult = await _yt.search.search(query, filter: TypeFilters.video);
-        _searchResults = searchResult.toList(); 
-      } catch (e) {
-        debugPrint('YouTube araması sırasında hata: $e');
-        _searchResults = []; 
-      } finally {
-        _isSearching = false; 
-        notifyListeners(); 
+    if (!_searchHistory.contains(query)) {
+      _searchHistory.insert(0, query);
+    }
+    
+    _isSearching = true; 
+    notifyListeners();
+
+    try {
+      final response = await http.get(Uri.parse('$_backendUrl/search?query=${Uri.encodeComponent(query)}'));
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        _searchResults = data['results']; 
+      } else {
+        debugPrint('Sunucu hatası: ${response.statusCode}');
+        _searchResults = [];
       }
+    } catch (e) {
+      debugPrint('Python backend bağlantı hatası: $e');
+      _searchResults = []; 
+    } finally {
+      _isSearching = false; 
+      notifyListeners(); 
     }
   }
 
@@ -115,15 +130,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  final AudioPlayer _audioPlayer = Container().runtimeType == Navigator().runtimeType ? AudioPlayer() : AudioPlayer();
-  bool _isPlaying = false;
-  
-  // GÜNCELLENDİ: Çalan şarkı yapısını standart bir Map haline getirdik
-  Map<dynamic, dynamic>? _currentSong; 
-
-  bool get isPlaying => _isPlaying;
-  Map<dynamic, dynamic>? get currentSong => _currentSong;
-
   Future<void> _initAudio() async {
     _audioPlayer.playerStateStream.listen((playerState) {
       _isPlaying = playerState.playing;
@@ -131,45 +137,49 @@ class MyAppState extends ChangeNotifier {
     });
   }
 
-  // Çevrimiçi Arama Sayfasından Şarkı Çalma ve Arka Planda İndirme Mantığı
+  // YENİ: Python sunucusu üzerinden şarkı indirme ve çalma
   Future<void> playOnlineSong(dynamic video) async {
     File? file;
     IOSink? fileStream;
     
     try {
-      // Önce şarkı bilgilerini map yapısına dönüştürerek Mini Player'a gönder
       _currentSong = {
-        'id': video.id.value,
-        'title': video.title,
-        'author': video.author,
-        'thumbnail': video.thumbnails.lowResUrl,
-        'path': '', // Henüz indirme bitmediği için boş
+        'id': video['id'],
+        'title': video['title'],
+        'author': video['author'],
+        'thumbnail': video['thumbnail'],
+        'path': '', 
       };
       _isAudioLoading = true;
       notifyListeners();
 
-      var manifest = await _yt.videos.streamsClient.getManifest(video.id);
-      if (manifest.muxed.isEmpty) throw Exception("Uygun akış bulunamadı.");
-      var streamInfo = manifest.muxed.first; 
+      String streamUrl = "$_backendUrl/stream/${video['id']}";
       
       var tempDir = await getTemporaryDirectory();
-      String filePath = '${tempDir.path}/${video.id.value}.mp4';
+      String filePath = '${tempDir.path}/${video['id']}.mp4';
       file = File(filePath);
 
       if (!await file.exists() || await file.length() == 0) {
-        debugPrint("Şarkı arka planda indiriliyor...");
-        var stream = _yt.videos.streamsClient.get(streamInfo);
-        fileStream = file.openWrite();
-
-        await stream.pipe(fileStream).timeout(const Duration(seconds: 25));
-        await fileStream.flush();
-        await fileStream.close();
+        debugPrint("Şarkı Python sunucusu üzerinden güvenle indiriliyor...");
+        final response = await http.Client().send(http.Request('GET', Uri.parse(streamUrl)));
+        
+        // 200 (OK) veya 307 (Redirect) başarılı sayılır
+        if (response.statusCode == 200 || response.statusCode == 307) {
+          fileStream = file.openWrite();
+          await response.stream.pipe(fileStream);
+          await fileStream.flush();
+          await fileStream.close();
+          debugPrint("İndirme başarılı! Boyut: ${await file.length()} bytes");
+        } else {
+          throw Exception("Sunucu akış vermeyi reddetti: ${response.statusCode}");
+        }
+      } else {
+        debugPrint("Şarkı zaten yerel hafızada mevcut.");
       }
 
-      // GÜNCELLENDİ: İndirme başarılı olduysa, bu şarkıyı tüm detayları ve klasör yoluyla Hive'a kaydet!
       _currentSong!['path'] = filePath;
       
-      if (!_downloadedSongs.any((s) => s['id'] == video.id.value)) {
+      if (!_downloadedSongs.any((s) => s['id'] == video['id'])) {
         _downloadedSongs.add(_currentSong!);
         _libraryBox.put('downloaded_songs', _downloadedSongs);
       }
@@ -178,11 +188,10 @@ class MyAppState extends ChangeNotifier {
       _audioPlayer.play();
       
     } catch (e) {
-      debugPrint("Oynatma hatası, yedek plana geçiliyor: $e");
+      debugPrint("Müzik çalma/indirme hatası: $e");
       if (fileStream != null) await fileStream.close();
       if (file != null && await file.exists()) await file.delete();
       
-      // Güvenli yedek çalma
       try {
         await _audioPlayer.setUrl('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
         _audioPlayer.play();
@@ -193,8 +202,6 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  // GÜNCELLENDİ: Çevrimdışı (İndirilenler) Listesinden Şarkı Çalan Yeni Metod
-  // Hiçbir internet isteği atmaz, doğrudan cihazdaki fiziksel dosyayı tetikler!
   Future<void> playOfflineSong(Map<dynamic, dynamic> song) async {
     try {
       _currentSong = song;
@@ -227,7 +234,6 @@ class MyAppState extends ChangeNotifier {
   @override
   void dispose() {
     _audioPlayer.dispose();
-    _yt.close(); 
     super.dispose();
   }
 }
@@ -256,7 +262,7 @@ class _MyHomePageState extends State<MyHomePage> {
         page = const LibraryPage();
         break;
       default:
-        throw UnimplementedError('no widget for $selectedIndex');
+        throw UnimplementedError('Hatalı sayfa indeksi');
     }
 
     return Scaffold(
@@ -308,7 +314,6 @@ class MiniPlayer extends StatelessWidget {
     final songTitle = hasSong ? appState.currentSong!['title'] : 'Henüz Şarkı Seçilmedi';
     final thumbnailUrl = hasSong ? appState.currentSong!['thumbnail'] : null;
     
-    // Şarkının indirilip indirilmediğini ID kontrolüyle yapıyoruz
     final isDownloaded = hasSong && appState.downloadedSongs.any((s) => s['id'] == appState.currentSong!['id']);
 
     return Container(
@@ -324,7 +329,7 @@ class MiniPlayer extends StatelessWidget {
             height: 64,
             color: Colors.grey[850],
             child: hasSong
-                ? Image.network(thumbnailUrl, fit: BoxFit.cover,
+                ? Image.network(thumbnailUrl!, fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) => const Icon(Icons.music_note, color: Colors.white, size: 32))
                 : const Icon(Icons.music_note, color: Colors.white, size: 32),
           ),
@@ -452,16 +457,16 @@ class _SearchPageState extends State<SearchPage> {
                               leading: ClipRRect(
                                 borderRadius: BorderRadius.circular(4),
                                 child: Image.network(
-                                  video.thumbnails.lowResUrl, width: 64, height: 48, fit: BoxFit.cover,
+                                  video['thumbnail'], width: 64, height: 48, fit: BoxFit.cover,
                                   errorBuilder: (context, error, stackTrace) => Container(width: 64, height: 48, color: Colors.grey[800], child: const Icon(Icons.music_note)),
                                 ),
                               ),
-                              title: Text(video.title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: Text(video.author, maxLines: 1),
+                              title: Text(video['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text(video['author'], maxLines: 1),
                               trailing: const Icon(Icons.play_arrow, color: Colors.grey),
                               onTap: () {
                                 FocusManager.instance.primaryFocus?.unfocus();
-                                appState.playOnlineSong(video); // Online arama çalması
+                                appState.playOnlineSong(video); 
                               },
                             );
                           },
@@ -509,7 +514,6 @@ class HomePage extends StatelessWidget {
   }
 }
 
-// GÜNCELLENDİ: Kütüphane Sayfası artık fiziksel olarak indirilen şarkıları listeliyor ve internetsiz çalabiliyor
 class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
 
