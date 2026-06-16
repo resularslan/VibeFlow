@@ -55,6 +55,8 @@ class MyAppState extends ChangeNotifier {
 
   bool _isSearching = false;
   bool _isAudioLoading = false; 
+  bool _isDownloading = false;
+  bool get isDownloading => _isDownloading;
 
   bool get isSearching => _isSearching;
   bool get isAudioLoading => _isAudioLoading;
@@ -137,11 +139,8 @@ class MyAppState extends ChangeNotifier {
     });
   }
 
-  // YENİ: Python sunucusu üzerinden şarkı indirme ve çalma
+  // 1. SADECE ÇEVRİMİÇİ ÇALAR (Artık beklemeden anında başlar)
   Future<void> playOnlineSong(dynamic video) async {
-    File? file;
-    IOSink? fileStream;
-    
     try {
       _currentSong = {
         'id': video['id'],
@@ -153,51 +152,59 @@ class MyAppState extends ChangeNotifier {
       _isAudioLoading = true;
       notifyListeners();
 
+      // Python'daki Stream linkini doğrudan Oynatıcıya veriyoruz (Dosya indirmiyoruz)
       String streamUrl = "$_backendUrl/stream/${video['id']}";
-      
-      var tempDir = await getTemporaryDirectory();
-      String filePath = '${tempDir.path}/${video['id']}.mp4';
-      file = File(filePath);
-
-      if (!await file.exists() || await file.length() == 0) {
-        debugPrint("Şarkı Python sunucusu üzerinden güvenle indiriliyor...");
-        final response = await http.Client().send(http.Request('GET', Uri.parse(streamUrl)));
-        
-        // 200 (OK) veya 307 (Redirect) başarılı sayılır
-        if (response.statusCode == 200 || response.statusCode == 307) {
-          fileStream = file.openWrite();
-          await response.stream.pipe(fileStream);
-          await fileStream.flush();
-          await fileStream.close();
-          debugPrint("İndirme başarılı! Boyut: ${await file.length()} bytes");
-        } else {
-          throw Exception("Sunucu akış vermeyi reddetti: ${response.statusCode}");
-        }
-      } else {
-        debugPrint("Şarkı zaten yerel hafızada mevcut.");
-      }
-
-      _currentSong!['path'] = filePath;
-      
-      if (!_downloadedSongs.any((s) => s['id'] == video['id'])) {
-        _downloadedSongs.add(_currentSong!);
-        _libraryBox.put('downloaded_songs', _downloadedSongs);
-      }
-
-      await _audioPlayer.setAudioSource(AudioSource.file(filePath));
+      await _audioPlayer.setAudioSource(AudioSource.uri(Uri.parse(streamUrl)));
       _audioPlayer.play();
       
     } catch (e) {
-      debugPrint("Müzik çalma/indirme hatası: $e");
-      if (fileStream != null) await fileStream.close();
-      if (file != null && await file.exists()) await file.delete();
-      
-      try {
-        await _audioPlayer.setUrl('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
-        _audioPlayer.play();
-      } catch (_) {}
+      debugPrint("Akış hatası: $e");
     } finally {
       _isAudioLoading = false; 
+      notifyListeners();
+    }
+  }
+
+  // 2. KULLANICI İSTERSE ARKA PLANDA İNDİRİR
+  Future<void> downloadCurrentSong() async {
+    if (_currentSong == null || _isDownloading) return;
+
+    // Şarkı zaten indirilmişse boşuna işlem yapma
+    if (_downloadedSongs.any((s) => s['id'] == _currentSong!['id'])) return;
+
+    _isDownloading = true;
+    notifyListeners();
+
+    File? file;
+    IOSink? fileStream;
+
+    try {
+      String streamUrl = "$_backendUrl/stream/${_currentSong!['id']}";
+      var tempDir = await getTemporaryDirectory();
+      String filePath = '${tempDir.path}/${_currentSong!['id']}.mp4';
+      file = File(filePath);
+
+      final response = await http.Client().send(http.Request('GET', Uri.parse(streamUrl)));
+      
+      if (response.statusCode == 200 || response.statusCode == 307) {
+        fileStream = file.openWrite();
+        await response.stream.pipe(fileStream);
+        await fileStream.flush();
+        await fileStream.close();
+
+        // İndirme bitti, veritabanına sadece bu aşamada ekle
+        Map<dynamic, dynamic> downloadedSongInfo = Map.from(_currentSong!);
+        downloadedSongInfo['path'] = filePath;
+        
+        _downloadedSongs.add(downloadedSongInfo);
+        _libraryBox.put('downloaded_songs', _downloadedSongs);
+      }
+    } catch (e) {
+      debugPrint("İndirme hatası: $e");
+      if (fileStream != null) await fileStream.close();
+      if (file != null && await file.exists()) await file.delete();
+    } finally {
+      _isDownloading = false;
       notifyListeners();
     }
   }
@@ -361,7 +368,22 @@ class MiniPlayer extends StatelessWidget {
               padding: EdgeInsets.symmetric(horizontal: 16.0),
               child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2)),
             )
+          else if (appState.isDownloading)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              // İndirme yapılıyorken beyaz bir yükleme ikonu dönsün
+              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
+            )
+          else if (hasSong && !isDownloaded && !appState.isAudioLoading)
+            // Şarkı var ama henüz indirilmemişse İndirme butonunu göster
+            IconButton(
+              icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey, size: 28),
+              onPressed: () { 
+                appState.downloadCurrentSong(); 
+              },
+            )
           else if (isDownloaded)
+            // İndirilmişse yeşil tik göster
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0),
               child: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 28),
