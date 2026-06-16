@@ -587,42 +587,78 @@ class LibraryPage extends StatelessWidget {
             },
           ),
           
+          // DEĞİŞEN KISIM: Artık şarkıları burada listelemek yerine, tıklanınca yeni sayfaya yönlendiriyoruz (Navigator.push)
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(width: 50, height: 50, color: const Color(0xFF1DB954), child: const Icon(Icons.download_done, color: Colors.white)),
             title: const Text('İndirilen Şarkılar'),
             subtitle: Text('${appState.downloadedSongs.length} şarkı • Çevrimdışı hazır'),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const DownloadedSongsPage()));
+            },
           ),
 
           const SizedBox(height: 16),
           const Divider(color: Colors.black),
+          const SizedBox(height: 16),
           
-          if (appState.downloadedSongs.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                "Henüz indirilen şarkı yok.", 
-                style: TextStyle(color: Colors.grey[600]), 
-                textAlign: TextAlign.center
-              ),
-            )
-          else
-            ...appState.downloadedSongs.map((song) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.music_note))),
-              ),
-              title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(song['author'], maxLines: 1),
-              trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954)),
-              onTap: () {
-                appState.playOfflineSong(song);
-              },
-            )).toList(),
+          ...appState.playlists.map((playlistName) => ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Container(
+              width: 50,
+              height: 50,
+              color: Colors.grey[850],
+              child: const Icon(Icons.queue_music, color: Colors.white),
+            ),
+            title: Text(playlistName, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Çalma Listesi'),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+          )).toList(),
         ],
       ),
+    );
+  }
+}
+// YENİ: Sadece indirilen şarkıları gösteren özel alt sayfa
+class DownloadedSongsPage extends StatelessWidget {
+  const DownloadedSongsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    var appState = context.watch<MyAppState>();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("İndirilen Şarkılar"),
+        backgroundColor: Colors.black,
+      ),
+      body: appState.downloadedSongs.isEmpty
+          ? Center(child: Text("Henüz indirilen şarkı yok.", style: TextStyle(color: Colors.grey[600])))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: appState.downloadedSongs.length,
+              itemBuilder: (context, index) {
+                final song = appState.downloadedSongs[index];
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.network(
+                      song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.music_note))
+                    ),
+                  ),
+                  title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(song['author'], maxLines: 1),
+                  trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954)),
+                  onTap: () {
+                    // Şarkıya tıklandığında çevrimdışı oynatma metodunu tetikliyoruz
+                    appState.playOfflineSong(song);
+                  },
+                );
+              },
+            ),
     );
   }
 }
