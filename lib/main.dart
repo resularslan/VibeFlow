@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
@@ -30,7 +29,10 @@ class MyApp extends StatelessWidget {
         darkTheme: ThemeData(
           brightness: Brightness.dark,
           scaffoldBackgroundColor: const Color(0xFF121212),
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1DB954), brightness: Brightness.dark),
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF1DB954),
+            brightness: Brightness.dark,
+          ),
           useMaterial3: true,
         ),
         home: const MyHomePage(),
@@ -41,39 +43,38 @@ class MyApp extends StatelessWidget {
 
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
-  
+
   Map<dynamic, dynamic> _playlists = {};
   List<Map<dynamic, dynamic>> _downloadedSongs = [];
   List<Map<dynamic, dynamic>> _recentSongs = [];
-  
+
   Map<dynamic, dynamic> get playlists => _playlists;
   List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
   List<Map<dynamic, dynamic>> get recentSongs => _recentSongs;
-
-  final String _backendUrl = "https://benim-muzigim-api.onrender.com"; 
+  // BULUT SUNUCUYU KURUNCA BURAYI DEĞİŞTİRECEĞİZ
+  final String _backendUrl = "http://10.0.2.2:8000";
 
   bool _isSearching = false;
-  bool _isAudioLoading = false; 
-  String? _downloadingSongId; 
+  bool _isAudioLoading = false;
+  String? _downloadingSongId;
 
   bool get isSearching => _isSearching;
   bool get isAudioLoading => _isAudioLoading;
   String? get downloadingSongId => _downloadingSongId;
 
-  List<dynamic> _searchResults = []; 
+  List<dynamic> _searchResults = [];
   List<dynamic> get searchResults => _searchResults;
 
   // --- AKILLI OYNATMA KUYRUĞU VE TRUE SHUFFLE MOTORU ---
   final AudioPlayer _audioPlayer = AudioPlayer();
   AudioPlayer get player => _audioPlayer;
-  
+
   List<Map<dynamic, dynamic>> _queue = [];
   int _queueIndex = 0;
   bool _isPlaying = false;
-  bool _isShuffle = false; 
-  Map<dynamic, dynamic>? _currentSong; 
+  bool _isShuffle = false;
+  Map<dynamic, dynamic>? _currentSong;
 
-  // YENİ: Tekrarsız karışık çalma havuz değişkenleri
   List<int> _shuffledIndices = [];
   int _shuffledPointer = 0;
 
@@ -96,7 +97,7 @@ class MyAppState extends ChangeNotifier {
   // --- ÇALMA LİSTESİ DÜZENLEME ---
   void createPlaylist(String name) {
     if (name.isNotEmpty && !_playlists.containsKey(name)) {
-      _playlists[name] = []; 
+      _playlists[name] = [];
       _libraryBox.put('custom_playlists', _playlists);
       notifyListeners();
     }
@@ -123,7 +124,9 @@ class MyAppState extends ChangeNotifier {
   }
 
   void reorderPlaylist(String playlistName, int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
     final item = _playlists[playlistName].removeAt(oldIndex);
     _playlists[playlistName].insert(newIndex, item);
     _libraryBox.put('custom_playlists', _playlists);
@@ -131,7 +134,9 @@ class MyAppState extends ChangeNotifier {
   }
 
   void reorderDownloadedSongs(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
     final item = _downloadedSongs.removeAt(oldIndex);
     _downloadedSongs.insert(newIndex, item);
     _libraryBox.put('downloaded_songs', _downloadedSongs);
@@ -142,12 +147,13 @@ class MyAppState extends ChangeNotifier {
   void addToRecents(Map<dynamic, dynamic> song) {
     _recentSongs.removeWhere((s) => s['id'] == song['id']);
     _recentSongs.insert(0, song);
-    if (_recentSongs.length > 10) _recentSongs.removeLast();
+    if (_recentSongs.length > 10) {
+      _recentSongs.removeLast();
+    }
     _libraryBox.put('recent_songs', _recentSongs);
     notifyListeners();
   }
 
-  // YENİ: Son çalınanlardan tekli şarkı silme (Çarpı butonu fonksiyonu)
   void removeFromRecents(String songId) {
     _recentSongs.removeWhere((s) => s['id'] == songId);
     _libraryBox.put('recent_songs', _recentSongs);
@@ -156,20 +162,30 @@ class MyAppState extends ChangeNotifier {
 
   // --- ARAMA ---
   Future<void> performSearch(String query) async {
-    if (query.isEmpty) return;
-    _isSearching = true; notifyListeners();
+    if (query.isEmpty) {
+      return;
+    }
+    _isSearching = true;
+    notifyListeners();
     try {
       final response = await http.get(Uri.parse('$_backendUrl/search?query=${Uri.encodeComponent(query)}'));
-      if (response.statusCode == 200) _searchResults = json.decode(response.body)['results']; 
-      else _searchResults = [];
-    } catch (e) {
-      _searchResults = []; 
+      if (response.statusCode == 200) {
+        _searchResults = json.decode(response.body)['results'];
+      } else {
+        _searchResults = [];
+      }
+    } catch (_) {
+      _searchResults = [];
     } finally {
-      _isSearching = false; notifyListeners(); 
+      _isSearching = false;
+      notifyListeners();
     }
   }
-  
-  void clearSearchResults() { _searchResults = []; notifyListeners(); }
+
+  void clearSearchResults() {
+    _searchResults = [];
+    notifyListeners();
+  }
 
   // --- BAĞLAM VE HAVUZLU SEÇİM MOTORU ---
   Future<void> _initAudio() async {
@@ -182,7 +198,6 @@ class MyAppState extends ChangeNotifier {
     });
   }
 
-  // YENİDEN TASARLANDI: Karışık çalma açıldığında adil havuz oluşturma mantığı
   void toggleShuffle() {
     _isShuffle = !_isShuffle;
     if (_isShuffle && _queue.isNotEmpty) {
@@ -198,21 +213,30 @@ class MyAppState extends ChangeNotifier {
   }
 
   void playSingleSong(dynamic video, {BuildContext? context}) {
-    final mapVideo = {'id': video['id'], 'title': video['title'], 'author': video['author'], 'thumbnail': video['thumbnail'], 'path': video['path'] ?? ''};
-    _queue = [mapVideo]; 
+    final mapVideo = {
+      'id': video['id'],
+      'title': video['title'],
+      'author': video['author'],
+      'thumbnail': video['thumbnail'],
+      'path': video['path'] ?? ''
+    };
+    _queue = [mapVideo];
     _queueIndex = 0;
     _playCurrentQueueItem(context: context);
   }
 
-  // YENİDEN TASARLANDI: Listeden çalma başlatıldığında havuz kontrolü
   void playPlaylist(List songs, int startIndex, {BuildContext? context}) {
-    if (songs.isEmpty) return;
+    if (songs.isEmpty) {
+      return;
+    }
     _queue = List<Map<dynamic, dynamic>>.from(songs);
-    
+
     if (_isShuffle) {
       _shuffledIndices = List.generate(_queue.length, (i) => i)..shuffle();
       _shuffledPointer = _shuffledIndices.indexOf(startIndex);
-      if (_shuffledPointer == -1) _shuffledPointer = 0;
+      if (_shuffledPointer == -1) {
+        _shuffledPointer = 0;
+      }
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
       _queueIndex = startIndex;
@@ -220,14 +244,14 @@ class MyAppState extends ChangeNotifier {
     _playCurrentQueueItem(context: context);
   }
 
-  // YENİDEN TASARLANDI: Havuz bitene kadar tek bir şarkıyı bile tekrarlamayan ileri sarmak
   void playNext({BuildContext? context}) {
-    if (_queue.isEmpty) return;
-    
+    if (_queue.isEmpty) {
+      return;
+    }
+
     if (_isShuffle) {
       _shuffledPointer++;
       if (_shuffledPointer >= _shuffledIndices.length) {
-        // Bütün şarkılar en az 1 kez çaldı (Tur tamamlandı)! Havuzu yeniden karıştırıyoruz
         _shuffledIndices.shuffle();
         _shuffledPointer = 0;
       }
@@ -239,35 +263,43 @@ class MyAppState extends ChangeNotifier {
         _audioPlayer.stop();
         _isPlaying = false;
         notifyListeners();
-        return; 
+        return;
       }
     }
     _playCurrentQueueItem(context: context);
   }
 
   void playPrevious({BuildContext? context}) {
-    if (_queue.isEmpty) return;
+    if (_queue.isEmpty) {
+      return;
+    }
     if (_isShuffle) {
       _shuffledPointer--;
-      if (_shuffledPointer < 0) _shuffledPointer = _shuffledIndices.length - 1;
+      if (_shuffledPointer < 0) {
+        _shuffledPointer = _shuffledIndices.length - 1;
+      }
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
       _queueIndex--;
-      if (_queueIndex < 0) _queueIndex = 0;
+      if (_queueIndex < 0) {
+        _queueIndex = 0;
+      }
     }
     _playCurrentQueueItem(context: context);
   }
 
   Future<void> _playCurrentQueueItem({BuildContext? context}) async {
-    if (_queue.isEmpty || _queueIndex >= _queue.length) return;
-    
+    if (_queue.isEmpty || _queueIndex >= _queue.length) {
+      return;
+    }
+
     var song = _queue[_queueIndex];
     _currentSong = song;
     _isAudioLoading = true;
     notifyListeners();
 
     var dlMatch = _downloadedSongs.firstWhere((s) => s['id'] == song['id'], orElse: () => {});
-    
+
     try {
       if (dlMatch.isNotEmpty) {
         File file = File(dlMatch['path']);
@@ -282,14 +314,20 @@ class MyAppState extends ChangeNotifier {
         await _audioPlayer.setAudioSource(AudioSource.uri(Uri.parse(streamUrl)));
         _audioPlayer.play();
       }
-    } catch (e) {
-      debugPrint("Atlanıyor: $e");
-      if (context != null && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${song['title']} atlandı (İnternet veya dosya hatası)"), duration: const Duration(seconds: 1)));
+    } catch (_) {
+      final localContext = context;
+      if (localContext != null && localContext.mounted) {
+        ScaffoldMessenger.of(localContext).showSnackBar(
+          SnackBar(
+            content: Text("${song['title']} atlandı (İnternet veya dosya hatası)"),
+            duration: const Duration(seconds: 1),
+          ),
+        );
       }
       playNext(context: context);
-      return; 
-    } final {
+      return;
+    } finally {
+      // YAZIM HATASI BURADAYDI! (final yerine finally olması gerekiyor)
       _isAudioLoading = false;
       notifyListeners();
     }
@@ -298,19 +336,25 @@ class MyAppState extends ChangeNotifier {
   void seekAudio(Duration position) => _audioPlayer.seek(position);
   void setVolume(double volume) => _audioPlayer.setVolume(volume);
   void togglePlay() {
-    if (_isPlaying) _audioPlayer.pause();
-    else _audioPlayer.play();
+    if (_isPlaying) {
+      _audioPlayer.pause();
+    } else {
+      _audioPlayer.play();
+    }
   }
 
   // --- İNDİRME ---
   Future<void> downloadSpecificSong(Map<dynamic, dynamic> songToDownload, BuildContext context) async {
     final targetId = songToDownload['id'];
-    if (_downloadedSongs.any((s) => s['id'] == targetId) || _downloadingSongId != null) return;
+    if (_downloadedSongs.any((s) => s['id'] == targetId) || _downloadingSongId != null) {
+      return;
+    }
 
     _downloadingSongId = targetId;
     notifyListeners();
 
-    File? file; IOSink? fileStream;
+    File? file;
+    IOSink? fileStream;
     try {
       String streamUrl = "$_backendUrl/stream/$targetId";
       var tempDir = await getTemporaryDirectory();
@@ -318,23 +362,34 @@ class MyAppState extends ChangeNotifier {
       file = File(filePath);
 
       final response = await http.Client().send(http.Request('GET', Uri.parse(streamUrl))).timeout(const Duration(seconds: 30));
-      
+
       if (response.statusCode == 200 || response.statusCode == 307) {
         fileStream = file.openWrite();
         await response.stream.pipe(fileStream);
-        await fileStream.flush(); await fileStream.close();
+        await fileStream.flush();
+        await fileStream.close();
 
         final savedSong = Map<dynamic, dynamic>.from(songToDownload);
         savedSong['path'] = filePath;
         _downloadedSongs.add(savedSong);
         _libraryBox.put('downloaded_songs', _downloadedSongs);
-        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Şarkı başarıyla indirildi!"), backgroundColor: Color(0xFF1DB954)));
+        
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Şarkı başarıyla indirildi!"), backgroundColor: Color(0xFF1DB954)),
+        );
       }
-    } catch (e) {
-      if (fileStream != null) await fileStream.close();
-      if (file != null && await file.exists()) await file.delete();
+    } catch (_) {
+      if (fileStream != null) {
+        await fileStream.close();
+      }
+      if (file != null && await file.exists()) {
+        await file.delete();
+      }
     } finally {
-      if (_downloadingSongId == targetId) _downloadingSongId = null;
+      if (_downloadingSongId == targetId) {
+        _downloadingSongId = null;
+      }
       notifyListeners();
     }
   }
@@ -344,7 +399,9 @@ class MyAppState extends ChangeNotifier {
     if (songIndex != -1) {
       try {
         final file = File(_downloadedSongs[songIndex]['path']);
-        if (await file.exists()) await file.delete();
+        if (await file.exists()) {
+          await file.delete();
+        }
       } catch (_) {}
       _downloadedSongs.removeAt(songIndex);
       _libraryBox.put('downloaded_songs', _downloadedSongs);
@@ -353,24 +410,38 @@ class MyAppState extends ChangeNotifier {
   }
 
   @override
-  void dispose() { _audioPlayer.dispose(); super.dispose(); }
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
 }
 
 // Alt Menü
 void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<dynamic, dynamic> songToSave) {
   showModalBottomSheet(
-    context: context, backgroundColor: Colors.grey[900],
+    context: context,
+    backgroundColor: Colors.grey[900],
     builder: (context) {
       return ListView(
-        shrinkWrap: true, padding: const EdgeInsets.all(16),
+        shrinkWrap: true,
+        padding: const EdgeInsets.all(16),
         children: [
           const Text("Çalma Listesine Ekle", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
           const SizedBox(height: 16),
-          if (appState.playlists.isEmpty) const Padding(padding: EdgeInsets.all(16.0), child: Text("Önce Kütüphane'den bir liste oluşturun.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center))
-          else ...appState.playlists.keys.map((playlistName) => ListTile(
-              leading: const Icon(Icons.queue_music, color: Colors.white), title: Text(playlistName, style: const TextStyle(color: Colors.white)),
-              onTap: () { appState.addSongToPlaylist(playlistName, songToSave); Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'$playlistName' listesine eklendi!"), backgroundColor: const Color(0xFF1DB954))); },
-            )).toList(),
+          if (appState.playlists.isEmpty)
+            const Padding(padding: EdgeInsets.all(16.0), child: Text("Önce Kütüphane'den bir liste oluşturun.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center))
+          else
+            ...appState.playlists.keys.map((playlistName) {
+              return ListTile(
+                leading: const Icon(Icons.queue_music, color: Colors.white),
+                title: Text(playlistName, style: const TextStyle(color: Colors.white)),
+                onTap: () {
+                  appState.addSongToPlaylist(playlistName, songToSave);
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'$playlistName' listesine eklendi!"), backgroundColor: const Color(0xFF1DB954)));
+                },
+              );
+            }),
         ],
       );
     },
@@ -388,12 +459,35 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     Widget page;
-    switch (selectedIndex) { case 0: page = const HomePage(); break; case 1: page = const SearchPage(); break; case 2: page = const LibraryPage(); break; default: throw UnimplementedError('Hatalı sayfa'); }
+    switch (selectedIndex) {
+      case 0:
+        page = const HomePage();
+        break;
+      case 1:
+        page = const SearchPage();
+        break;
+      case 2:
+        page = const LibraryPage();
+        break;
+      default:
+        throw UnimplementedError('Hatalı sayfa');
+    }
     return Scaffold(
       body: Column(children: [Expanded(child: page), const MiniPlayer()]),
       bottomNavigationBar: NavigationBar(
-        onDestinationSelected: (int index) { setState(() { selectedIndex = index; }); }, backgroundColor: Colors.black, indicatorColor: const Color(0xFF1DB954).withOpacity(0.3), selectedIndex: selectedIndex,
-        destinations: const <Widget>[ NavigationDestination(selectedIcon: Icon(Icons.home, color: Colors.white), icon: Icon(Icons.home_outlined, color: Colors.grey), label: 'Home'), NavigationDestination(selectedIcon: Icon(Icons.search, color: Colors.white), icon: Icon(Icons.search_outlined, color: Colors.grey), label: 'Search'), NavigationDestination(selectedIcon: Icon(Icons.library_music, color: Colors.white), icon: Icon(Icons.library_music_outlined, color: Colors.grey), label: 'Library') ],
+        onDestinationSelected: (int index) {
+          setState(() {
+            selectedIndex = index;
+          });
+        },
+        backgroundColor: Colors.black,
+        indicatorColor: const Color(0xFF1DB954).withValues(alpha: 0.3),
+        selectedIndex: selectedIndex,
+        destinations: const <Widget>[
+          NavigationDestination(selectedIcon: Icon(Icons.home, color: Colors.white), icon: Icon(Icons.home_outlined, color: Colors.grey), label: 'Home'),
+          NavigationDestination(selectedIcon: Icon(Icons.search, color: Colors.white), icon: Icon(Icons.search_outlined, color: Colors.grey), label: 'Search'),
+          NavigationDestination(selectedIcon: Icon(Icons.library_music, color: Colors.white), icon: Icon(Icons.library_music_outlined, color: Colors.grey), label: 'Library')
+        ],
       ),
     );
   }
@@ -407,22 +501,42 @@ class MiniPlayer extends StatelessWidget {
     final song = appState.currentSong;
     final hasSong = song != null;
     final isDownloaded = hasSong && appState.downloadedSongs.any((s) => s['id'] == song['id']);
-    
+
     return Container(
-      height: 64, decoration: const BoxDecoration(color: Color(0xFF181818), border: Border(bottom: BorderSide(color: Colors.black, width: 1))),
+      height: 64,
+      decoration: const BoxDecoration(color: Color(0xFF181818), border: Border(bottom: BorderSide(color: Colors.black, width: 1))),
       child: Row(
         children: [
-          Container(width: 64, height: 64, color: Colors.grey[850], child: hasSong ? Image.network(song['thumbnail'] ?? '', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.music_note, color: Colors.white, size: 32)) : const Icon(Icons.music_note, color: Colors.white, size: 32)),
+          Container(
+            width: 64,
+            height: 64,
+            color: Colors.grey[850],
+            child: hasSong
+                ? Image.network(song['thumbnail'] ?? '', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.music_note, color: Colors.white, size: 32))
+                : const Icon(Icons.music_note, color: Colors.white, size: 32),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: GestureDetector(
-              onTap: () { if (hasSong) Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen())); },
-              onLongPress: () { if (hasSong) showPlaylistSelectionSheet(context, appState, song); },
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+              onTap: () {
+                if (hasSong) {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen()));
+                }
+              },
+              onLongPress: () {
+                if (hasSong) {
+                  showPlaylistSelectionSheet(context, appState, song);
+                }
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
                   Text(hasSong ? song['title'] : 'Henüz Şarkı Seçilmedi', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
                   Text(appState.isAudioLoading ? 'Bağlanıyor...' : (isDownloaded ? 'Cihazda Kayıtlı' : (hasSong ? 'Çevrimiçi Akış' : '')), style: const TextStyle(color: Color(0xFF1DB954), fontSize: 12, fontWeight: FontWeight.bold)),
-                ]),
+                ],
+              ),
             ),
           ),
           IconButton(icon: Icon(appState.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32), onPressed: (hasSong && !appState.isAudioLoading) ? () => appState.togglePlay() : null),
@@ -443,7 +557,11 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _debounce;
   @override
-  void dispose() { _searchController.dispose(); _debounce?.cancel(); super.dispose(); }
+  void dispose() {
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -457,11 +575,38 @@ class _SearchPageState extends State<SearchPage> {
             const Text("Arama", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             SizedBox(
-              width: double.infinity, height: 50,
+              width: double.infinity,
+              height: 50,
               child: SearchBar(
-                controller: _searchController, hintText: "Ne dinlemek istiyorsun?", hintStyle: const WidgetStatePropertyAll<TextStyle>(TextStyle(color: Colors.grey)), backgroundColor: WidgetStatePropertyAll<Color>(Colors.white.withOpacity(0.1)), padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.symmetric(horizontal: 16.0)), leading: const Icon(Icons.search, color: Colors.grey),
-                trailing: _searchController.text.isNotEmpty ? [IconButton(icon: const Icon(Icons.clear, color: Colors.grey), onPressed: () { _searchController.clear(); appState.clearSearchResults(); setState(() {}); })] : null,
-                onChanged: (value) { _debounce?.cancel(); _debounce = Timer(const Duration(milliseconds: 500), () { if (value.isNotEmpty) appState.performSearch(value); else appState.clearSearchResults(); }); setState(() {}); },
+                controller: _searchController,
+                hintText: "Ne dinlemek istiyorsun?",
+                hintStyle: const WidgetStatePropertyAll<TextStyle>(TextStyle(color: Colors.grey)),
+                backgroundColor: WidgetStatePropertyAll<Color>(Colors.white.withValues(alpha: 0.1)),
+                padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.symmetric(horizontal: 16.0)),
+                leading: const Icon(Icons.search, color: Colors.grey),
+                trailing: _searchController.text.isNotEmpty
+                    ? [
+                        IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.grey),
+                          onPressed: () {
+                            _searchController.clear();
+                            appState.clearSearchResults();
+                            setState(() {});
+                          },
+                        )
+                      ]
+                    : null,
+                onChanged: (value) {
+                  _debounce?.cancel();
+                  _debounce = Timer(const Duration(milliseconds: 500), () {
+                    if (value.isNotEmpty) {
+                      appState.performSearch(value);
+                    } else {
+                      appState.clearSearchResults();
+                    }
+                  });
+                  setState(() {});
+                },
               ),
             ),
             const SizedBox(height: 24),
@@ -471,7 +616,8 @@ class _SearchPageState extends State<SearchPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (appState.recentSongs.isNotEmpty) ...[
-                          const Text("Son Çalınanlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 8),
+                          const Text("Son Çalınanlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          const SizedBox(height: 8),
                           Expanded(
                             child: ListView.builder(
                               itemCount: appState.recentSongs.length,
@@ -482,39 +628,71 @@ class _SearchPageState extends State<SearchPage> {
                                 return ListTile(
                                   contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
                                   leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(video['thumbnail'], width: 64, height: 48, fit: BoxFit.cover)),
-                                  title: Text(video['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(video['author'], maxLines: 1),
-                                  // GÜNCELLENDİ: Son çalınanlardan teker teker şarkı silmek için çarpı (X) butonu eklendi
-                                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                    IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.grey), onPressed: () => showPlaylistSelectionSheet(context, appState, video)),
-                                    if (isDling) const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2)) else if (isDl) const Icon(Icons.offline_pin, color: Color(0xFF1DB954)) else IconButton(icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey), onPressed: () => appState.downloadSpecificSong(video, context)),
-                                    IconButton(icon: const Icon(Icons.close, color: Colors.grey, size: 20), onPressed: () => appState.removeFromRecents(video['id'])),
-                                  ]),
-                                  onTap: () { FocusManager.instance.primaryFocus?.unfocus(); appState.addToRecents(video); appState.playSingleSong(video, context: context); }, 
+                                  title: Text(video['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                  subtitle: Text(video['author'], maxLines: 1),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.grey), onPressed: () => showPlaylistSelectionSheet(context, appState, video)),
+                                      if (isDling)
+                                        const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2))
+                                      else if (isDl)
+                                        const Icon(Icons.offline_pin, color: Color(0xFF1DB954))
+                                      else
+                                        IconButton(icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey), onPressed: () => appState.downloadSpecificSong(video, context)),
+                                      IconButton(icon: const Icon(Icons.close, color: Colors.grey, size: 20), onPressed: () => appState.removeFromRecents(video['id'])),
+                                    ],
+                                  ),
+                                  onTap: () {
+                                    FocusManager.instance.primaryFocus?.unfocus();
+                                    appState.addToRecents(video);
+                                    appState.playSingleSong(video, context: context);
+                                  },
                                 );
                               },
                             ),
                           ),
-                        ] else Center(child: Text("Aramak istediğiniz şarkıyı yazın.", style: TextStyle(color: Colors.grey[500], fontSize: 16))),
+                        ] else
+                          Center(child: Text("Aramak istediğiniz şarkıyı yazın.", style: TextStyle(color: Colors.grey[500], fontSize: 16))),
                       ],
                     )
-                  : appState.isSearching 
+                  : appState.isSearching
                       ? const Center(child: CircularProgressIndicator(color: Color(0xFF1DB954)))
                       : ListView.builder(
                           itemCount: appState.searchResults.length,
                           itemBuilder: (context, index) {
                             final video = appState.searchResults[index];
-                            final mapVideo = {'id': video['id'], 'title': video['title'], 'author': video['author'], 'thumbnail': video['thumbnail'], 'path': ''};
+                            final mapVideo = {
+                              'id': video['id'],
+                              'title': video['title'],
+                              'author': video['author'],
+                              'thumbnail': video['thumbnail'],
+                              'path': ''
+                            };
                             final isDl = appState.downloadedSongs.any((s) => s['id'] == mapVideo['id']);
                             final isDling = appState.downloadingSongId == mapVideo['id'];
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
                               leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(video['thumbnail'], width: 64, height: 48, fit: BoxFit.cover)),
-                              title: Text(video['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(video['author'], maxLines: 1),
-                              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                                IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.grey), onPressed: () => showPlaylistSelectionSheet(context, appState, mapVideo)),
-                                if (isDling) const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2)) else if (isDl) const Icon(Icons.offline_pin, color: Color(0xFF1DB954)) else IconButton(icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey), onPressed: () => appState.downloadSpecificSong(mapVideo, context)),
-                              ]),
-                              onTap: () { FocusManager.instance.primaryFocus?.unfocus(); appState.addToRecents(mapVideo); appState.playSingleSong(mapVideo, context: context); }, 
+                              title: Text(video['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text(video['author'], maxLines: 1),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.grey), onPressed: () => showPlaylistSelectionSheet(context, appState, mapVideo)),
+                                  if (isDling)
+                                    const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2))
+                                  else if (isDl)
+                                    const Icon(Icons.offline_pin, color: Color(0xFF1DB954))
+                                  else
+                                    IconButton(icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey), onPressed: () => appState.downloadSpecificSong(mapVideo, context)),
+                                ],
+                              ),
+                              onTap: () {
+                                FocusManager.instance.primaryFocus?.unfocus();
+                                appState.addToRecents(mapVideo);
+                                appState.playSingleSong(mapVideo, context: context);
+                              },
                             );
                           },
                         ),
@@ -537,14 +715,46 @@ class HomePage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Hoş Geldin', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const SizedBox(height: 24),
-            if (appState.playlists.isEmpty) Container(width: double.infinity, padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(8)), child: Column(children: const [Icon(Icons.queue_music, size: 48, color: Colors.grey), SizedBox(height: 16), Text("Henüz buralar çok sessiz.", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)), SizedBox(height: 8), Text("Kütüphaneden ilk çalma listeni oluşturarak başlayabilirsin.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center)]))
-            else ...[ const Text("Senin Listelerin", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)), const SizedBox(height: 16),
+            const Text('Hoş Geldin', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            if (appState.playlists.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(8)),
+                child: Column(
+                  children: const [
+                    Icon(Icons.queue_music, size: 48, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text("Henüz buralar çok sessiz.", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 8),
+                    Text("Kütüphaneden ilk çalma listeni oluşturarak başlayabilirsin.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center)
+                  ],
+                ),
+              )
+            else ...[
+              const Text("Senin Listelerin", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 16),
               GridView.builder(
-                shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 3, mainAxisSpacing: 8, crossAxisSpacing: 8), itemCount: appState.playlists.length,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 3, mainAxisSpacing: 8, crossAxisSpacing: 8),
+                itemCount: appState.playlists.length,
                 itemBuilder: (context, index) {
                   String playlistName = appState.playlists.keys.elementAt(index);
-                  return GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PlaylistDetailsPage(playlistName: playlistName))), child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(4)), child: Row(children: [Container(width: 56, color: Colors.grey[800], child: const Icon(Icons.music_note)), const SizedBox(width: 8), Expanded(child: Text(playlistName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis))])));
+                  return GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PlaylistDetailsPage(playlistName: playlistName))),
+                    child: Container(
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                      child: Row(
+                        children: [
+                          Container(width: 56, color: Colors.grey[800], child: const Icon(Icons.music_note)),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(playlistName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis))
+                        ],
+                      ),
+                    ),
+                  );
                 },
               ),
             ]
@@ -562,7 +772,7 @@ class DownloadedSongsPage extends StatefulWidget {
 }
 
 class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
-  bool _isEditing = false; 
+  bool _isEditing = false;
 
   @override
   Widget build(BuildContext context) {
@@ -571,8 +781,11 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("İndirilen Şarkılar"), backgroundColor: Colors.black,
-        actions: [ IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing)) ],
+        title: const Text("İndirilen Şarkılar"),
+        backgroundColor: Colors.black,
+        actions: [
+          IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing))
+        ],
       ),
       body: Column(
         children: [
@@ -583,12 +796,14 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
               children: [
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
-                  icon: const Icon(Icons.play_arrow), label: const Text("Oynat"),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text("Oynat"),
                   onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, 0, context: context),
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey[800], foregroundColor: Colors.white),
-                  icon: const Icon(Icons.shuffle), label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
+                  icon: const Icon(Icons.shuffle),
+                  label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
                   onPressed: allSongs.isEmpty ? null : () => appState.toggleShuffle(),
                 ),
               ],
@@ -600,35 +815,47 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                 ? Center(child: Text("Henüz indirilen şarkı yok.", style: TextStyle(color: Colors.grey[600])))
                 : _isEditing
                     ? ReorderableListView.builder(
-                        buildDefaultDragHandles: false, // Varsayılanı kapatıp özel tetikleyici koyuyoruz
-                        padding: const EdgeInsets.all(8), itemCount: allSongs.length,
+                        buildDefaultDragHandles: false,
+                        padding: const EdgeInsets.all(8),
+                        itemCount: allSongs.length,
                         onReorder: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
-                          // GÜNCELLENDİ: Dokunmatik hassasiyeti artıran ReorderableDragStartListener eklendi, silme sola, sürükleme sağa taşındı!
                           return ReorderableDragStartListener(
-                            index: index, key: ValueKey("dl_${song['id']}_$index"),
+                            index: index,
+                            key: ValueKey("dl_${song['id']}_$index"),
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                              leading: Row(mainAxisSize: MainAxisSize.min, children: [
-                                IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent), onPressed: () { appState.deleteDownloadedSong(song['id']); }),
-                                const SizedBox(width: 8),
-                                ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
-                              ]),
-                              title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(song['author'], maxLines: 1),
+                              leading: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                    onPressed: () {
+                                      appState.deleteDownloadedSong(song['id']);
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
+                                ],
+                              ),
+                              title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text(song['author'], maxLines: 1),
                               trailing: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.drag_handle, color: Colors.grey, size: 28)),
                             ),
                           );
                         },
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.all(8), itemCount: allSongs.length,
+                        padding: const EdgeInsets.all(8),
+                        itemCount: allSongs.length,
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
                           return ListTile(
                             contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
                             leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
-                            title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(song['author'], maxLines: 1),
+                            title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(song['author'], maxLines: 1),
                             trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20),
                             onTap: () => appState.playPlaylist(allSongs, index, context: context),
                           );
@@ -650,28 +877,67 @@ class LibraryPage extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
-          Row(children: const [CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.person, color: Colors.white)), SizedBox(width: 16), Text("Kütüphanen", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))]), const SizedBox(height: 24),
+          Row(
+            children: const [
+              CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.person, color: Colors.white)),
+              SizedBox(width: 16),
+              Text("Kütüphanen", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))
+            ],
+          ),
+          const SizedBox(height: 24),
           ListTile(
-            contentPadding: EdgeInsets.zero, leading: Container(width: 50, height: 50, color: Colors.grey[800], child: const Icon(Icons.add)), title: const Text('Yeni Çalma Listesi Oluştur'),
+            contentPadding: EdgeInsets.zero,
+            leading: Container(width: 50, height: 50, color: Colors.grey[800], child: const Icon(Icons.add)),
+            title: const Text('Yeni Çalma Listesi Oluştur'),
             onTap: () {
               showDialog(
                 context: context,
                 builder: (context) {
                   final TextEditingController controller = TextEditingController();
                   return AlertDialog(
-                    backgroundColor: Colors.grey[900], title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)), content: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
-                    actions: [ TextButton(onPressed: () => Navigator.pop(context), child: const Text('Iptal', style: TextStyle(color: Colors.grey))), TextButton(onPressed: () { appState.createPlaylist(controller.text); Navigator.pop(context); }, child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954)))) ],
+                    backgroundColor: Colors.grey[900],
+                    title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)),
+                    content: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Iptal', style: TextStyle(color: Colors.grey))),
+                      TextButton(
+                        onPressed: () {
+                          appState.createPlaylist(controller.text);
+                          Navigator.pop(context);
+                        },
+                        child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954))),
+                      )
+                    ],
                   );
                 },
               );
             },
           ),
-          ListTile(contentPadding: EdgeInsets.zero, leading: Container(width: 50, height: 50, color: const Color(0xFF1DB954), child: const Icon(Icons.download_done, color: Colors.white)), title: const Text('İndirilen Şarkılar'), subtitle: Text('${appState.downloadedSongs.length} şarkı • Çevrimdışı hazır'), trailing: const Icon(Icons.chevron_right, color: Colors.grey), onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => const DownloadedSongsPage())); }),
-          const SizedBox(height: 16), const Divider(color: Colors.black), const SizedBox(height: 16),
-          ...appState.playlists.entries.map((entry) => ListTile(
-            contentPadding: EdgeInsets.zero, leading: Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.queue_music, color: Colors.white)), title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text('${entry.value.length} Şarkı'), trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => PlaylistDetailsPage(playlistName: entry.key))); },
-          )).toList(),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Container(width: 50, height: 50, color: const Color(0xFF1DB954), child: const Icon(Icons.download_done, color: Colors.white)),
+            title: const Text('İndirilen Şarkılar'),
+            subtitle: Text('${appState.downloadedSongs.length} şarkı • Çevrimdışı hazır'),
+            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const DownloadedSongsPage()));
+            },
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.black),
+          const SizedBox(height: 16),
+          ...appState.playlists.entries.map((entry) {
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.queue_music, color: Colors.white)),
+              title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('${entry.value.length} Şarkı'),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => PlaylistDetailsPage(playlistName: entry.key)));
+              },
+            );
+          }),
         ],
       ),
     );
@@ -686,7 +952,7 @@ class PlaylistDetailsPage extends StatefulWidget {
 }
 
 class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
-  bool _isEditing = false; 
+  bool _isEditing = false;
 
   @override
   Widget build(BuildContext context) {
@@ -695,8 +961,11 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.playlistName), backgroundColor: Colors.black,
-        actions: [ IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing)) ],
+        title: Text(widget.playlistName),
+        backgroundColor: Colors.black,
+        actions: [
+          IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing))
+        ],
       ),
       body: Column(
         children: [
@@ -707,12 +976,14 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
               children: [
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
-                  icon: const Icon(Icons.play_arrow), label: const Text("Oynat"),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text("Oynat"),
                   onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, 0, context: context),
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey[800], foregroundColor: Colors.white),
-                  icon: const Icon(Icons.shuffle), label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
+                  icon: const Icon(Icons.shuffle),
+                  label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
                   onPressed: allSongs.isEmpty ? null : () => appState.toggleShuffle(),
                 ),
               ],
@@ -724,38 +995,50 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                 ? Center(child: Text("Bu liste boş.", style: TextStyle(color: Colors.grey[600])))
                 : _isEditing
                     ? ReorderableListView.builder(
-                        buildDefaultDragHandles: false, 
-                        padding: const EdgeInsets.all(8), itemCount: allSongs.length,
+                        buildDefaultDragHandles: false,
+                        padding: const EdgeInsets.all(8),
+                        itemCount: allSongs.length,
                         onReorder: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
-                          // GÜNCELLENDİ: Dokunmatik hassasiyeti artıran ReorderableDragStartListener eklendi, silme sola, sürükleme sağa taşındı!
                           return ReorderableDragStartListener(
-                            index: index, key: ValueKey("pl_${song['id']}_$index"),
+                            index: index,
+                            key: ValueKey("pl_${song['id']}_$index"),
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                              leading: Row(mainAxisSize: MainAxisSize.min, children: [
-                                IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent), onPressed: () { appState.removeSongFromPlaylist(widget.playlistName, song['id']); }),
-                                const SizedBox(width: 8),
-                                ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
-                              ]),
-                              title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(song['author'], maxLines: 1),
+                              leading: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
+                                    onPressed: () {
+                                      appState.removeSongFromPlaylist(widget.playlistName, song['id']);
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
+                                ],
+                              ),
+                              title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text(song['author'], maxLines: 1),
                               trailing: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.drag_handle, color: Colors.grey, size: 28)),
                             ),
                           );
                         },
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.all(8), itemCount: allSongs.length,
+                        padding: const EdgeInsets.all(8),
+                        itemCount: allSongs.length,
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
                           final isDownloaded = appState.downloadedSongs.any((s) => s['id'] == song['id']);
                           return ListTile(
                             contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
                             leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
-                            title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(song['author'], maxLines: 1),
+                            title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(song['author'], maxLines: 1),
                             trailing: isDownloaded ? const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20) : null,
-                            onTap: () => appState.playPlaylist(allSongs, index, context: context), 
+                            onTap: () => appState.playPlaylist(allSongs, index, context: context),
                           );
                         },
                       ),
@@ -770,7 +1053,9 @@ class PlayerScreen extends StatelessWidget {
   const PlayerScreen({super.key});
 
   String formatDuration(Duration? duration) {
-    if (duration == null) return "0:00";
+    if (duration == null) {
+      return "0:00";
+    }
     String twoDigits(int n) => n.toString().padLeft(2, "0");
     return "${duration.inHours > 0 ? '${duration.inHours}:' : ''}${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}";
   }
@@ -779,10 +1064,18 @@ class PlayerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
     final song = appState.currentSong;
-    if (song == null) return const Scaffold(body: Center(child: Text("Şarkı Yok")));
+    if (song == null) {
+      return const Scaffold(body: Center(child: Text("Şarkı Yok")));
+    }
 
     return Scaffold(
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, leading: IconButton(icon: const Icon(Icons.keyboard_arrow_down, size: 32), onPressed: () => Navigator.pop(context)), title: const Text("Şimdi Çalıyor", style: TextStyle(fontSize: 14, color: Colors.grey)), centerTitle: true),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.keyboard_arrow_down, size: 32), onPressed: () => Navigator.pop(context)),
+        title: const Text("Şimdi Çalıyor", style: TextStyle(fontSize: 14, color: Colors.grey)),
+        centerTitle: true,
+      ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24.0),
         child: Column(
@@ -802,14 +1095,32 @@ class PlayerScreen extends StatelessWidget {
                   stream: appState.player.positionStream,
                   builder: (context, snapshot) {
                     var position = snapshot.data ?? Duration.zero;
-                    if (position > duration) position = duration;
+                    if (position > duration) {
+                      position = duration;
+                    }
                     return Column(
                       children: [
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(trackHeight: 4.0, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0), activeTrackColor: const Color(0xFF1DB954), inactiveTrackColor: Colors.grey[800], thumbColor: Colors.white),
-                          child: Slider(min: 0.0, max: duration.inMilliseconds.toDouble(), value: position.inMilliseconds.toDouble(), onChanged: (value) { appState.seekAudio(Duration(milliseconds: value.toInt())); }),
+                          child: Slider(
+                            min: 0.0,
+                            max: duration.inMilliseconds.toDouble(),
+                            value: position.inMilliseconds.toDouble(),
+                            onChanged: (value) {
+                              appState.seekAudio(Duration(milliseconds: value.toInt()));
+                            },
+                          ),
                         ),
-                        Padding(padding: const EdgeInsets.symmetric(horizontal: 16.0), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(formatDuration(position), style: const TextStyle(color: Colors.grey, fontSize: 12)), Text(formatDuration(duration), style: const TextStyle(color: Colors.grey, fontSize: 12))])),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(formatDuration(position), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                              Text(formatDuration(duration), style: const TextStyle(color: Colors.grey, fontSize: 12))
+                            ],
+                          ),
+                        ),
                       ],
                     );
                   },
@@ -818,12 +1129,12 @@ class PlayerScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Row(
-              mainAxisAlignment: MainAxisAlignment.center, 
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(iconSize: 48, icon: const Icon(Icons.skip_previous, color: Colors.white), onPressed: () => appState.playPrevious()),
                 IconButton(iconSize: 64, icon: Icon(appState.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white), onPressed: () => appState.togglePlay()),
                 IconButton(iconSize: 48, icon: const Icon(Icons.skip_next, color: Colors.white), onPressed: () => appState.playNext()),
-              ]
+              ],
             ),
             const SizedBox(height: 32),
             Row(
@@ -836,7 +1147,14 @@ class PlayerScreen extends StatelessWidget {
                       final volume = snapshot.data ?? 1.0;
                       return SliderTheme(
                         data: SliderTheme.of(context).copyWith(trackHeight: 2.0, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0), activeTrackColor: Colors.white, inactiveTrackColor: Colors.grey[800], thumbColor: Colors.white),
-                        child: Slider(min: 0.0, max: 1.0, value: volume, onChanged: (value) { appState.setVolume(value); }),
+                        child: Slider(
+                          min: 0.0,
+                          max: 1.0,
+                          value: volume,
+                          onChanged: (value) {
+                            appState.setVolume(value);
+                          },
+                        ),
                       );
                     },
                   ),
