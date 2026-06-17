@@ -1,5 +1,8 @@
 package com.example.my_music_app
 
 import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity // YENİ EKLENDİ
 
-class MainActivity : FlutterActivity()
+// YENİ: Normal FlutterActivity yerine AudioServiceActivity kullanıyoruz
+class MainActivity: AudioServiceActivity() {
+}

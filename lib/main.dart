@@ -4,12 +4,21 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart'; // YENİ: Arka Plan Paketi
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // YENİ: Arka plan ses bildirim panelini başlatıyoruz
+  await JustAudioBackground.init(
+    androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
+    androidNotificationChannelName: 'Müzik Çalar',
+    androidNotificationOngoing: true,
+  );
+
   await Hive.initFlutter();
   await Hive.openBox('libraryBox');
   runApp(const MyApp());
@@ -51,7 +60,7 @@ class MyAppState extends ChangeNotifier {
   Map<dynamic, dynamic> get playlists => _playlists;
   List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
   List<Map<dynamic, dynamic>> get recentSongs => _recentSongs;
-  // BULUT SUNUCUYU KURUNCA BURAYI DEĞİŞTİRECEĞİZ
+
   final String _backendUrl = "http://10.0.2.2:8000";
 
   bool _isSearching = false;
@@ -65,7 +74,6 @@ class MyAppState extends ChangeNotifier {
   List<dynamic> _searchResults = [];
   List<dynamic> get searchResults => _searchResults;
 
-  // --- AKILLI OYNATMA KUYRUĞU VE TRUE SHUFFLE MOTORU ---
   final AudioPlayer _audioPlayer = AudioPlayer();
   AudioPlayer get player => _audioPlayer;
 
@@ -94,7 +102,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- ÇALMA LİSTESİ DÜZENLEME ---
   void createPlaylist(String name) {
     if (name.isNotEmpty && !_playlists.containsKey(name)) {
       _playlists[name] = [];
@@ -143,7 +150,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- SON ÇALINANLAR KONTROLÜ ---
   void addToRecents(Map<dynamic, dynamic> song) {
     _recentSongs.removeWhere((s) => s['id'] == song['id']);
     _recentSongs.insert(0, song);
@@ -160,7 +166,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- ARAMA ---
   Future<void> performSearch(String query) async {
     if (query.isEmpty) {
       return;
@@ -187,7 +192,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- BAĞLAM VE HAVUZLU SEÇİM MOTORU ---
   Future<void> _initAudio() async {
     _audioPlayer.playerStateStream.listen((playerState) {
       _isPlaying = playerState.playing;
@@ -251,19 +255,25 @@ class MyAppState extends ChangeNotifier {
 
     if (_isShuffle) {
       _shuffledPointer++;
+      // GÜNCELLENDİ: Karışık çalarken liste bittiyse (Tur tamamlandıysa) sonsuz döngüye girme, Oynatmayı durdur!
       if (_shuffledPointer >= _shuffledIndices.length) {
-        _shuffledIndices.shuffle();
         _shuffledPointer = 0;
+        _queueIndex = _shuffledIndices[0]; // Yeniden başlatılırsa başa dönsün
+        _audioPlayer.stop();
+        _isPlaying = false;
+        notifyListeners();
+        return; // Durdur!
       }
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
       _queueIndex++;
+      // GÜNCELLENDİ: Sırayla çalarken liste bittiyse sonsuz döngüye girme, Oynatmayı durdur!
       if (_queueIndex >= _queue.length) {
         _queueIndex = 0;
         _audioPlayer.stop();
         _isPlaying = false;
         notifyListeners();
-        return;
+        return; // Durdur!
       }
     }
     _playCurrentQueueItem(context: context);
@@ -300,18 +310,29 @@ class MyAppState extends ChangeNotifier {
 
     var dlMatch = _downloadedSongs.firstWhere((s) => s['id'] == song['id'], orElse: () => {});
 
+    // YENİ: Bildirim paneli (Background Audio) için müzik bilgilerini (MediaItem) oluşturuyoruz
+    final mediaItem = MediaItem(
+      id: song['id'],
+      album: "My Music App",
+      title: song['title'],
+      artist: song['author'],
+      artUri: Uri.parse(song['thumbnail']),
+    );
+
     try {
       if (dlMatch.isNotEmpty) {
         File file = File(dlMatch['path']);
         if (await file.exists()) {
-          await _audioPlayer.setAudioSource(AudioSource.file(dlMatch['path']));
+          // Bildirim bilgisini müzikle birleştirerek çal
+          await _audioPlayer.setAudioSource(AudioSource.file(dlMatch['path'], tag: mediaItem));
           _audioPlayer.play();
         } else {
           throw Exception("Dosya bozuk.");
         }
       } else {
         String streamUrl = "$_backendUrl/stream/${song['id']}";
-        await _audioPlayer.setAudioSource(AudioSource.uri(Uri.parse(streamUrl)));
+        // Bildirim bilgisini internet akışıyla birleştirerek çal
+        await _audioPlayer.setAudioSource(AudioSource.uri(Uri.parse(streamUrl), tag: mediaItem));
         _audioPlayer.play();
       }
     } catch (_) {
@@ -327,7 +348,6 @@ class MyAppState extends ChangeNotifier {
       playNext(context: context);
       return;
     } finally {
-      // YAZIM HATASI BURADAYDI! (final yerine finally olması gerekiyor)
       _isAudioLoading = false;
       notifyListeners();
     }
@@ -343,7 +363,6 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  // --- İNDİRME ---
   Future<void> downloadSpecificSong(Map<dynamic, dynamic> songToDownload, BuildContext context) async {
     final targetId = songToDownload['id'];
     if (_downloadedSongs.any((s) => s['id'] == targetId) || _downloadingSongId != null) {
@@ -416,7 +435,6 @@ class MyAppState extends ChangeNotifier {
   }
 }
 
-// Alt Menü
 void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<dynamic, dynamic> songToSave) {
   showModalBottomSheet(
     context: context,
