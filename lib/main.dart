@@ -648,19 +648,21 @@ class LibraryPage extends StatelessWidget {
           const SizedBox(height: 16),
           
           // Kütüphane sayfasının en altındaki playlist gösterimi
+          // Çalma Listeleri Gösterimi
           ...appState.playlists.entries.map((entry) => ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Container(
-              width: 50,
-              height: 50,
-              color: Colors.grey[850],
-              child: const Icon(Icons.queue_music, color: Colors.white),
-            ),
+            leading: Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.queue_music, color: Colors.white)),
             title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text('${entry.value.length} Şarkı'), // Artık içinde kaç şarkı olduğunu gösteriyor!
+            subtitle: Text('${entry.value.length} Şarkı'),
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Liste içeriği yakında eklenecek!")));
+              // YENİ EKLENDİ: Artık tıklanınca liste detay sayfasına gidiyor
+              Navigator.push(
+                context, 
+                MaterialPageRoute(
+                  builder: (context) => PlaylistDetailsPage(playlistName: entry.key)
+                )
+              );
             },
           )).toList(),
         ],
@@ -877,6 +879,58 @@ class PlayerScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// YENİ: Çalma Listesi Detay Sayfası
+class PlaylistDetailsPage extends StatelessWidget {
+  final String playlistName;
+  const PlaylistDetailsPage({super.key, required this.playlistName});
+
+  @override
+  Widget build(BuildContext context) {
+    var appState = context.watch<MyAppState>();
+    
+    // Listede hiç şarkı yoksa hata vermemesi için boş liste [] döndür
+    List songs = appState.playlists[playlistName] ?? [];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(playlistName),
+        backgroundColor: Colors.black,
+      ),
+      body: songs.isEmpty
+          ? Center(child: Text("Bu liste henüz boş.", style: TextStyle(color: Colors.grey[600])))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: songs.length,
+              itemBuilder: (context, index) {
+                final song = songs[index];
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8.0),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.network(
+                      song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.music_note))
+                    ),
+                  ),
+                  title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(song['author'], maxLines: 1),
+                  trailing: const Icon(Icons.play_arrow, color: Colors.grey),
+                  onTap: () {
+                    // Akıllı Oynatma Mantığı: Şarkı indirilmişse internetsiz çal, indirilmemişse online akıştan çal
+                    final isDownloaded = appState.downloadedSongs.any((s) => s['id'] == song['id']);
+                    if (isDownloaded) {
+                      appState.playOfflineSong(song);
+                    } else {
+                      appState.playOnlineSong(song);
+                    }
+                  },
+                );
+              },
+            ),
     );
   }
 }
