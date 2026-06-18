@@ -8,11 +8,13 @@ import 'package:just_audio_background/just_audio_background.dart'; // YENİ: Ark
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // YENİ: Arka plan ses bildirim panelini başlatıyoruz
+  await dotenv.load(fileName: ".env"); // YENİ: Gizli dosyayı yüklüyoruz
+  
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
     androidNotificationChannelName: 'Müzik Çalar',
@@ -61,7 +63,7 @@ class MyAppState extends ChangeNotifier {
   List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
   List<Map<dynamic, dynamic>> get recentSongs => _recentSongs;
 
-  final String _backendUrl = "https://music-app-backend-x738.onrender.com";
+  final String _backendUrl = dotenv.env['BACKEND_URL']!;
 
   bool _isSearching = false;
   bool _isAudioLoading = false;
