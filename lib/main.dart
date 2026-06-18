@@ -61,7 +61,7 @@ class MyAppState extends ChangeNotifier {
   List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
   List<Map<dynamic, dynamic>> get recentSongs => _recentSongs;
 
-  final String _backendUrl = "http://10.0.2.2:8000";
+  final String _backendUrl = "https://music-app-backend-x738.onrender.com";
 
   bool _isSearching = false;
   bool _isAudioLoading = false;
@@ -513,12 +513,16 @@ class _MyHomePageState extends State<MyHomePage> {
 
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
+
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
     final song = appState.currentSong;
     final hasSong = song != null;
+    
+    // GÜVENLİ KONTROLLER
     final isDownloaded = hasSong && appState.downloadedSongs.any((s) => s['id'] == song['id']);
+    final isDownloading = hasSong && appState.downloadingSongId == song['id'];
 
     return Container(
       height: 64,
@@ -526,26 +530,16 @@ class MiniPlayer extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 64,
-            height: 64,
-            color: Colors.grey[850],
-            child: hasSong
+            width: 64, height: 64, color: Colors.grey[850],
+            child: hasSong 
                 ? Image.network(song['thumbnail'] ?? '', fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.music_note, color: Colors.white, size: 32))
                 : const Icon(Icons.music_note, color: Colors.white, size: 32),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: GestureDetector(
-              onTap: () {
-                if (hasSong) {
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen()));
-                }
-              },
-              onLongPress: () {
-                if (hasSong) {
-                  showPlaylistSelectionSheet(context, appState, song);
-                }
-              },
+              onTap: () { if (hasSong) Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen())); },
+              onLongPress: () { if (hasSong) showPlaylistSelectionSheet(context, appState, song); },
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -557,7 +551,23 @@ class MiniPlayer extends StatelessWidget {
               ),
             ),
           ),
-          IconButton(icon: Icon(appState.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32), onPressed: (hasSong && !appState.isAudioLoading) ? () => appState.togglePlay() : null),
+          
+          // YENİDEN EKLENDİ: Mini Player İndirme Butonu
+          if (isDownloading)
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 8.0), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2)))
+          else if (hasSong && !isDownloaded && !appState.isAudioLoading)
+            IconButton(
+              icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey, size: 28),
+              onPressed: () => appState.downloadSpecificSong(song, context)
+            )
+          else if (isDownloaded)
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 24)),
+
+          // Durdur / Oynat Butonu (Üçgen)
+          IconButton(
+            icon: Icon(appState.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32),
+            onPressed: (hasSong && !appState.isAudioLoading) ? () => appState.togglePlay() : null
+          ),
           const SizedBox(width: 8),
         ],
       ),
