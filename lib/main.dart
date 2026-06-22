@@ -79,7 +79,6 @@ class MyAppState extends ChangeNotifier {
   int _queueIndex = 0;
   bool _isPlaying = false;
   
-  // 🔥 DURUM DEĞİŞKENLERİ
   bool _isShuffle = false;
   bool _isRepeat = false;
   
@@ -138,7 +137,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 🔥 SIRALAMA BUG ÇÖZÜMÜ (Deep Copy Referans Yöntemi)
   void reorderPlaylist(String playlistName, int oldIndex, int newIndex) {
     if (oldIndex < newIndex) {
       newIndex -= 1;
@@ -151,7 +149,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 🔥 SIRALAMA BUG ÇÖZÜMÜ (Deep Copy Referans Yöntemi)
   void reorderDownloadedSongs(int oldIndex, int newIndex) {
     if (oldIndex < newIndex) {
       newIndex -= 1;
@@ -209,7 +206,6 @@ class MyAppState extends ChangeNotifier {
     });
   }
 
-  // 🔥 KARIŞTIRMA (SHUFFLE) & TEKRAR (REPEAT) BUTONU MANTIKLARI
   void toggleShuffle() {
     _isShuffle = !_isShuffle;
     if (_isShuffle && _queue.isNotEmpty) {
@@ -260,19 +256,15 @@ class MyAppState extends ChangeNotifier {
     _playCurrentQueueItem(context: context);
   }
 
-  // 🔥 SPOTIFY ALGORİTMASI BURADA ÇALIŞIYOR
   void playNext({BuildContext? context}) {
     if (_queue.isEmpty) return;
 
     if (_isShuffle) {
       _shuffledPointer++;
-      // Eğer karışık liste bittiyse...
       if (_shuffledPointer >= _shuffledIndices.length) {
         if (_isRepeat) {
           int lastPlayedIndex = _shuffledIndices.last;
           _shuffledIndices.shuffle();
-          
-          // Spotify Mantığı: Yeni sıranın ilk şarkısı, az önce çalan son şarkı olamaz!
           if (_shuffledIndices.length > 1 && _shuffledIndices.first == lastPlayedIndex) {
             int temp = _shuffledIndices[0];
             _shuffledIndices[0] = _shuffledIndices.last;
@@ -281,7 +273,6 @@ class MyAppState extends ChangeNotifier {
           _shuffledPointer = 0;
           _queueIndex = _shuffledIndices[_shuffledPointer];
         } else {
-          // Tekrar kapalıysa listede dur
           _audioPlayer.stop();
           _isPlaying = false;
           notifyListeners();
@@ -291,13 +282,11 @@ class MyAppState extends ChangeNotifier {
         _queueIndex = _shuffledIndices[_shuffledPointer];
       }
     } else {
-      // Shuffle kapalı, normal sıra
       _queueIndex++;
       if (_queueIndex >= _queue.length) {
         if (_isRepeat) {
-          _queueIndex = 0; // Başa dön
+          _queueIndex = 0; 
         } else {
-          // Tekrar kapalıysa dur
           _audioPlayer.stop();
           _isPlaying = false;
           notifyListeners();
@@ -423,7 +412,6 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  // 🔥 TOPLU İNDİRME FONKSİYONU
   Future<void> downloadAllFromPlaylist(String playlistName, BuildContext context) async {
     List songs = _playlists[playlistName] ?? [];
     if (songs.isEmpty) return;
@@ -433,7 +421,6 @@ class MyAppState extends ChangeNotifier {
     );
 
     for (var song in songs) {
-      // Şarkı inmemişse sırayla indir
       if (!_downloadedSongs.any((s) => s['id'] == song['id'])) {
         await downloadSpecificSong(song, context);
       }
@@ -469,28 +456,35 @@ void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<d
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.grey[900],
+    isScrollControlled: true, // Daha iyi boyutlandırma için eklendi
+    useSafeArea: true, // 🔥 SİSTEM ÇUBUĞUYLA ÇAKIŞMAYI KÖKTEN ÇÖZER
     builder: (context) {
-      return ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Text("Çalma Listesine Ekle", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          if (appState.playlists.isEmpty)
-            const Padding(padding: EdgeInsets.all(16.0), child: Text("Önce Kütüphane'den bir liste oluşturun.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center))
-          else
-            ...appState.playlists.keys.map((playlistName) {
-              return ListTile(
-                leading: const Icon(Icons.queue_music, color: Colors.white),
-                title: Text(playlistName, style: const TextStyle(color: Colors.white)),
-                onTap: () {
-                  appState.addSongToPlaylist(playlistName, songToSave);
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'$playlistName' listesine eklendi!"), backgroundColor: const Color(0xFF1DB954)));
-                },
-              );
-            }),
-        ],
+      return SafeArea( // 🔥 YUKARI VE AŞAĞIDAKİ SİSTEM BOŞLUKLARINA SAYGI DUYAR
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text("Çalma Listesine Ekle", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              if (appState.playlists.isEmpty)
+                const Padding(padding: EdgeInsets.all(16.0), child: Text("Önce Kütüphane'den bir liste oluşturun.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center))
+              else
+                ...appState.playlists.keys.map((playlistName) {
+                  return ListTile(
+                    leading: const Icon(Icons.queue_music, color: Colors.white),
+                    title: Text(playlistName, style: const TextStyle(color: Colors.white)),
+                    onTap: () {
+                      appState.addSongToPlaylist(playlistName, songToSave);
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'$playlistName' listesine eklendi!"), backgroundColor: const Color(0xFF1DB954)));
+                    },
+                  );
+                }),
+            ],
+          ),
+        ),
       );
     },
   );
@@ -841,76 +835,80 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
           IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing))
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text("Oynat"),
-                  onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
-                ),
-              ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text("Oynat"),
+                    onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(color: Colors.grey),
-          Expanded(
-            child: allSongs.isEmpty
-                ? Center(child: Text("Henüz indirilen şarkı yok.", style: TextStyle(color: Colors.grey[600])))
-                : _isEditing
-                    ? ReorderableListView.builder(
-                        buildDefaultDragHandles: false,
-                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
-                        itemCount: allSongs.length,
-                        onReorderItem: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
-                        itemBuilder: (context, index) {
-                          final song = allSongs[index];
-                          return ReorderableDragStartListener(
-                            index: index,
-                            key: ValueKey("dl_${song['id']}_$index"),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                              leading: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                                    onPressed: () {
-                                      appState.deleteDownloadedSong(song['id']);
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
-                                ],
+            const Divider(color: Colors.grey),
+            Expanded(
+              child: allSongs.isEmpty
+                  ? Center(child: Text("Henüz indirilen şarkı yok.", style: TextStyle(color: Colors.grey[600])))
+                  : _isEditing
+                      ? ReorderableListView.builder(
+                          buildDefaultDragHandles: false,
+                          padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
+                          itemCount: allSongs.length,
+                          // 🔥 INDEX YERİNE DOĞRUDAN EVENT KULLANILDI (Sıralama Hatasının Çözümü)
+                          onReorderItem: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
+                          itemBuilder: (context, index) {
+                            final song = allSongs[index];
+                            return ReorderableDragStartListener(
+                              index: index,
+                              // 🔥 HATA BURADAYDI: Key içinden indeks ($index) numarası SİLİNDİ!
+                              key: ValueKey("dl_${song['id']}"),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                                leading: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                      onPressed: () {
+                                        appState.deleteDownloadedSong(song['id']);
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
+                                  ],
+                                ),
+                                title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text(song['author'], maxLines: 1),
+                                trailing: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.drag_handle, color: Colors.grey, size: 28)),
                               ),
+                            );
+                          },
+                        )
+                      : ListView.builder(
+                          padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
+                          itemCount: allSongs.length,
+                          itemBuilder: (context, index) {
+                            final song = allSongs[index];
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                              leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
                               title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
                               subtitle: Text(song['author'], maxLines: 1),
-                              trailing: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.drag_handle, color: Colors.grey, size: 28)),
-                            ),
-                          );
-                        },
-                      )
-                    : ListView.builder(
-                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
-                        itemCount: allSongs.length,
-                        itemBuilder: (context, index) {
-                          final song = allSongs[index];
-                          return ListTile(
-                            contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                            leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
-                            title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            subtitle: Text(song['author'], maxLines: 1),
-                            trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20),
-                            onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
-                          );
-                        },
-                      ),
-          ),
-        ],
+                              trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20),
+                              onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1015,106 +1013,109 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
           IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing))
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text("Oynat"),
-                    onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], foregroundColor: Colors.white),
-                    icon: const Icon(Icons.download),
-                    label: const Text("Tümünü İndir"),
-                    onPressed: allSongs.isEmpty ? null : () => appState.downloadAllFromPlaylist(widget.playlistName, context),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
-                    icon: const Icon(Icons.delete),
-                    label: const Text("Sil"),
-                    onPressed: () {
-                      appState.deletePlaylist(widget.playlistName);
-                      Navigator.pop(context);
-                    },
-                  ),
-                ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text("Oynat"),
+                      onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], foregroundColor: Colors.white),
+                      icon: const Icon(Icons.download),
+                      label: const Text("Tümünü İndir"),
+                      onPressed: allSongs.isEmpty ? null : () => appState.downloadAllFromPlaylist(widget.playlistName, context),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
+                      icon: const Icon(Icons.delete),
+                      label: const Text("Sil"),
+                      onPressed: () {
+                        appState.deletePlaylist(widget.playlistName);
+                        Navigator.pop(context);
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const Divider(color: Colors.grey),
-          Expanded(
-            child: allSongs.isEmpty
-                ? Center(child: Text("Bu liste boş.", style: TextStyle(color: Colors.grey[600])))
-                : _isEditing
-                    ? ReorderableListView.builder(
-                        buildDefaultDragHandles: false,
-                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
-                        itemCount: allSongs.length,
-                        onReorderItem: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
-                        itemBuilder: (context, index) {
-                          final song = allSongs[index];
-                          return ReorderableDragStartListener(
-                            index: index,
-                            key: ValueKey("pl_${song['id']}_$index"),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                              leading: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
-                                    onPressed: () {
-                                      appState.removeSongFromPlaylist(widget.playlistName, song['id']);
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
-                                ],
+            const Divider(color: Colors.grey),
+            Expanded(
+              child: allSongs.isEmpty
+                  ? Center(child: Text("Bu liste boş.", style: TextStyle(color: Colors.grey[600])))
+                  : _isEditing
+                      ? ReorderableListView.builder(
+                          buildDefaultDragHandles: false,
+                          padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
+                          itemCount: allSongs.length,
+                          // 🔥 DOĞRU PARAMETRE KULLANIMI
+                          onReorderItem: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
+                          itemBuilder: (context, index) {
+                            final song = allSongs[index];
+                            return ReorderableDragStartListener(
+                              index: index,
+                              // 🔥 HATA BURADAYDI: Key içinden indeks ($index) numarası SİLİNDİ!
+                              key: ValueKey("pl_${song['id']}"),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                                leading: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
+                                      onPressed: () {
+                                        appState.removeSongFromPlaylist(widget.playlistName, song['id']);
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 40, height: 40, fit: BoxFit.cover)),
+                                  ],
+                                ),
+                                title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text(song['author'], maxLines: 1),
+                                trailing: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.drag_handle, color: Colors.grey, size: 28)),
                               ),
+                            );
+                          },
+                        )
+                      : ListView.builder(
+                          padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
+                          itemCount: allSongs.length,
+                          itemBuilder: (context, index) {
+                            final song = allSongs[index];
+                            final isDownloaded = appState.downloadedSongs.any((s) => s['id'] == song['id']);
+                            final isDownloading = appState.downloadingSongId == song['id'];
+                            
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                              leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
                               title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
                               subtitle: Text(song['author'], maxLines: 1),
-                              trailing: const Padding(padding: EdgeInsets.all(8.0), child: Icon(Icons.drag_handle, color: Colors.grey, size: 28)),
-                            ),
-                          );
-                        },
-                      )
-                    : ListView.builder(
-                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
-                        itemCount: allSongs.length,
-                        itemBuilder: (context, index) {
-                          final song = allSongs[index];
-                          final isDownloaded = appState.downloadedSongs.any((s) => s['id'] == song['id']);
-                          final isDownloading = appState.downloadingSongId == song['id'];
-                          
-                          return ListTile(
-                            contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
-                            leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
-                            title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            subtitle: Text(song['author'], maxLines: 1),
-                            // 🔥 TEKLİ İNDİRME VEYA ONAY İKONU
-                            trailing: isDownloading
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2))
-                                : isDownloaded 
-                                  ? const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 24) 
-                                  : IconButton(
-                                      icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey),
-                                      onPressed: () => appState.downloadSpecificSong(song, context),
-                                    ),
-                            onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
-                          );
-                        },
-                      ),
-          ),
-        ],
+                              trailing: isDownloading
+                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2))
+                                  : isDownloaded 
+                                    ? const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 24) 
+                                    : IconButton(
+                                        icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey),
+                                        onPressed: () => appState.downloadSpecificSong(song, context),
+                                      ),
+                              onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1196,7 +1197,6 @@ class PlayerScreen extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 16),
-              // 🔥 YENİ OYNATICI KONTROL PANELİ (Tekrar ve Karıştır butonları eklendi)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
