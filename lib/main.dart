@@ -8,10 +8,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:namer_app/youtube_service.dart';
 
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
   
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
@@ -32,7 +30,7 @@ class MyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (context) => MyAppState(),
       child: MaterialApp(
-        title: 'My Music App',
+        title: 'VibeFlow',
         debugShowCheckedModeBanner: false,
         themeMode: ThemeMode.dark,
         darkTheme: ThemeData(
@@ -80,14 +78,18 @@ class MyAppState extends ChangeNotifier {
   List<Map<dynamic, dynamic>> _queue = [];
   int _queueIndex = 0;
   bool _isPlaying = false;
+  
+  // 🔥 DURUM DEĞİŞKENLERİ
   bool _isShuffle = false;
+  bool _isRepeat = false;
+  
   Map<dynamic, dynamic>? _currentSong;
-
   List<int> _shuffledIndices = [];
   int _shuffledPointer = 0;
 
   bool get isPlaying => _isPlaying;
   bool get isShuffle => _isShuffle;
+  bool get isRepeat => _isRepeat;
   Map<dynamic, dynamic>? get currentSong => _currentSong;
 
   MyAppState() {
@@ -130,24 +132,34 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  void reorderPlaylist(String playlistName, int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
-    final item = _playlists[playlistName].removeAt(oldIndex);
-    _playlists[playlistName].insert(newIndex, item);
-    _libraryBox.put('custom_playlists', _playlists);
-    notifyListeners();
-  }
-  void deletePlaylist(String playlistName)
-  {
+  void deletePlaylist(String playlistName) {
     _playlists.remove(playlistName);
     _libraryBox.put('custom_playlists', _playlists);
     notifyListeners();
   }
 
+  // 🔥 SIRALAMA BUG ÇÖZÜMÜ (Deep Copy Referans Yöntemi)
+  void reorderPlaylist(String playlistName, int oldIndex, int newIndex) {
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    List currentList = List.from(_playlists[playlistName]);
+    final item = currentList.removeAt(oldIndex);
+    currentList.insert(newIndex, item);
+    _playlists[playlistName] = currentList;
+    _libraryBox.put('custom_playlists', _playlists);
+    notifyListeners();
+  }
+
+  // 🔥 SIRALAMA BUG ÇÖZÜMÜ (Deep Copy Referans Yöntemi)
   void reorderDownloadedSongs(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
-    final item = _downloadedSongs.removeAt(oldIndex);
-    _downloadedSongs.insert(newIndex, item);
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    List<Map<dynamic, dynamic>> currentList = List.from(_downloadedSongs);
+    final item = currentList.removeAt(oldIndex);
+    currentList.insert(newIndex, item);
+    _downloadedSongs = currentList;
     _libraryBox.put('downloaded_songs', _downloadedSongs);
     notifyListeners();
   }
@@ -166,7 +178,6 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 🔥 YENİ ARAMA FONKSİYONU: Hızlı ve sorunsuz API sorgusu
   Future<void> performSearch(String query) async {
     if (query.isEmpty) return;
     _isSearching = true;
@@ -176,7 +187,7 @@ class MyAppState extends ChangeNotifier {
       _searchResults = await _musicService.searchMusic(query);
     } catch (e) {
       debugPrint("❌ Arama Hatası: $e");
-      _searchResults = []; // Hata durumunda boş liste döndür
+      _searchResults = [];
     } finally {
       _isSearching = false;
       notifyListeners();
@@ -198,17 +209,23 @@ class MyAppState extends ChangeNotifier {
     });
   }
 
+  // 🔥 KARIŞTIRMA (SHUFFLE) & TEKRAR (REPEAT) BUTONU MANTIKLARI
   void toggleShuffle() {
     _isShuffle = !_isShuffle;
     if (_isShuffle && _queue.isNotEmpty) {
       _shuffledIndices = List.generate(_queue.length, (i) => i)..shuffle();
-      int currentInQueue = _queue.indexWhere((s) => s['id'] == _currentSong?['id']);
-      if (currentInQueue != -1) {
+      int currentInQueue = _queueIndex;
+      if (_queue.length > 1) {
         _shuffledIndices.remove(currentInQueue);
         _shuffledIndices.insert(0, currentInQueue);
       }
       _shuffledPointer = 0;
     }
+    notifyListeners();
+  }
+
+  void toggleRepeat() {
+    _isRepeat = !_isRepeat;
     notifyListeners();
   }
 
@@ -225,43 +242,67 @@ class MyAppState extends ChangeNotifier {
     _playCurrentQueueItem(context: context);
   }
 
-  void playPlaylist(List songs, int startIndex, {BuildContext? context}) {
+  void playPlaylist(List songs, {BuildContext? context, int? startIndex}) {
     if (songs.isEmpty) return;
     _queue = List<Map<dynamic, dynamic>>.from(songs);
 
     if (_isShuffle) {
       _shuffledIndices = List.generate(_queue.length, (i) => i)..shuffle();
-      _shuffledPointer = _shuffledIndices.indexOf(startIndex);
-      if (_shuffledPointer == -1) _shuffledPointer = 0;
+      if (startIndex != null) {
+        _shuffledIndices.remove(startIndex);
+        _shuffledIndices.insert(0, startIndex);
+      }
+      _shuffledPointer = 0;
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
-      _queueIndex = startIndex;
+      _queueIndex = startIndex ?? 0;
     }
     _playCurrentQueueItem(context: context);
   }
 
+  // 🔥 SPOTIFY ALGORİTMASI BURADA ÇALIŞIYOR
   void playNext({BuildContext? context}) {
     if (_queue.isEmpty) return;
 
     if (_isShuffle) {
       _shuffledPointer++;
+      // Eğer karışık liste bittiyse...
       if (_shuffledPointer >= _shuffledIndices.length) {
-        _shuffledPointer = 0;
-        _queueIndex = _shuffledIndices[0];
-        _audioPlayer.stop();
-        _isPlaying = false;
-        notifyListeners();
-        return;
+        if (_isRepeat) {
+          int lastPlayedIndex = _shuffledIndices.last;
+          _shuffledIndices.shuffle();
+          
+          // Spotify Mantığı: Yeni sıranın ilk şarkısı, az önce çalan son şarkı olamaz!
+          if (_shuffledIndices.length > 1 && _shuffledIndices.first == lastPlayedIndex) {
+            int temp = _shuffledIndices[0];
+            _shuffledIndices[0] = _shuffledIndices.last;
+            _shuffledIndices.last = temp;
+          }
+          _shuffledPointer = 0;
+          _queueIndex = _shuffledIndices[_shuffledPointer];
+        } else {
+          // Tekrar kapalıysa listede dur
+          _audioPlayer.stop();
+          _isPlaying = false;
+          notifyListeners();
+          return;
+        }
+      } else {
+        _queueIndex = _shuffledIndices[_shuffledPointer];
       }
-      _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
+      // Shuffle kapalı, normal sıra
       _queueIndex++;
       if (_queueIndex >= _queue.length) {
-        _queueIndex = 0;
-        _audioPlayer.stop();
-        _isPlaying = false;
-        notifyListeners();
-        return;
+        if (_isRepeat) {
+          _queueIndex = 0; // Başa dön
+        } else {
+          // Tekrar kapalıysa dur
+          _audioPlayer.stop();
+          _isPlaying = false;
+          notifyListeners();
+          return;
+        }
       }
     }
     _playCurrentQueueItem(context: context);
@@ -308,10 +349,7 @@ class MyAppState extends ChangeNotifier {
           throw Exception("Dosya bozuk.");
         }
       } else {
-        // İŞTE SPOTUBE YÖNTEMİ: Web yerine doğrudan Mobil API'leri kullan!
         var audioStreamInfo = await _musicService.getAudioStream(song['id']);
-
-        // Kılık değiştirme başlıklarını sildik, artık doğrudan linki veriyoruz
         await _audioPlayer.setAudioSource(
           AudioSource.uri(
             Uri.parse(audioStreamInfo.url.toString()), 
@@ -346,7 +384,6 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
-  // İndirme fonksiyonunu da servise bağlayalım
   Future<void> downloadSpecificSong(Map<dynamic, dynamic> songToDownload, BuildContext context) async {
     final targetId = songToDownload['id'];
     if (_downloadedSongs.any((s) => s['id'] == targetId) || _downloadingSongId != null) return;
@@ -358,9 +395,8 @@ class MyAppState extends ChangeNotifier {
     IOSink? fileStream;
     try {
       var stream = await _musicService.getStream(targetId);
-
       var tempDir = await getTemporaryDirectory();
-      String filePath = '${tempDir.path}/$targetId.m4a'; // Direkt kaliteli format
+      String filePath = '${tempDir.path}/$targetId.m4a';
       file = File(filePath);
       
       fileStream = file.openWrite();
@@ -387,6 +423,23 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
+  // 🔥 TOPLU İNDİRME FONKSİYONU
+  Future<void> downloadAllFromPlaylist(String playlistName, BuildContext context) async {
+    List songs = _playlists[playlistName] ?? [];
+    if (songs.isEmpty) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Liste indirmesi başlatıldı..."), backgroundColor: Color(0xFF1DB954)),
+    );
+
+    for (var song in songs) {
+      // Şarkı inmemişse sırayla indir
+      if (!_downloadedSongs.any((s) => s['id'] == song['id'])) {
+        await downloadSpecificSong(song, context);
+      }
+    }
+  }
+
   Future<void> deleteDownloadedSong(String songId) async {
     final songIndex = _downloadedSongs.indexWhere((s) => s['id'] == songId);
     if (songIndex != -1) {
@@ -409,7 +462,7 @@ class MyAppState extends ChangeNotifier {
 }
 
 // =========================================================================
-// UI WIDGETS (Arayüz Kodların Aynen Korunmuştur)
+// UI WIDGETS
 // =========================================================================
 
 void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<dynamic, dynamic> songToSave) {
@@ -799,13 +852,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
                   icon: const Icon(Icons.play_arrow),
                   label: const Text("Oynat"),
-                  onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, 0, context: context),
-                ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey[800], foregroundColor: Colors.white),
-                  icon: const Icon(Icons.shuffle),
-                  label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
-                  onPressed: allSongs.isEmpty ? null : () => appState.toggleShuffle(),
+                  onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
                 ),
               ],
             ),
@@ -817,7 +864,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                 : _isEditing
                     ? ReorderableListView.builder(
                         buildDefaultDragHandles: false,
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
                         itemCount: allSongs.length,
                         onReorderItem: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
                         itemBuilder: (context, index) {
@@ -848,7 +895,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                         },
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
                         itemCount: allSongs.length,
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
@@ -858,7 +905,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                             title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
                             subtitle: Text(song['author'], maxLines: 1),
                             trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20),
-                            onTap: () => appState.playPlaylist(allSongs, index, context: context),
+                            onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
                           );
                         },
                       ),
@@ -972,31 +1019,35 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text("Oynat"),
-                  onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, 0, context: context),
-                ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey[800], foregroundColor: Colors.white),
-                  icon: const Icon(Icons.shuffle),
-                  label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
-                  onPressed: allSongs.isEmpty ? null : () => appState.toggleShuffle(),
-                ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
-                  icon: const Icon(Icons.delete),
-                  label: const Text("Sil"),
-                  onPressed: () {
-                    appState.deletePlaylist(widget.playlistName);
-                    Navigator.pop(context);
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text("Oynat"),
+                    onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], foregroundColor: Colors.white),
+                    icon: const Icon(Icons.download),
+                    label: const Text("Tümünü İndir"),
+                    onPressed: allSongs.isEmpty ? null : () => appState.downloadAllFromPlaylist(widget.playlistName, context),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
+                    icon: const Icon(Icons.delete),
+                    label: const Text("Sil"),
+                    onPressed: () {
+                      appState.deletePlaylist(widget.playlistName);
+                      Navigator.pop(context);
                     },
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
           const Divider(color: Colors.grey),
@@ -1006,7 +1057,7 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                 : _isEditing
                     ? ReorderableListView.builder(
                         buildDefaultDragHandles: false,
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
                         itemCount: allSongs.length,
                         onReorderItem: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
                         itemBuilder: (context, index) {
@@ -1037,18 +1088,28 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                         },
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
                         itemCount: allSongs.length,
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
                           final isDownloaded = appState.downloadedSongs.any((s) => s['id'] == song['id']);
+                          final isDownloading = appState.downloadingSongId == song['id'];
+                          
                           return ListTile(
                             contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
                             leading: ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.network(song['thumbnail'], width: 50, height: 50, fit: BoxFit.cover)),
                             title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
                             subtitle: Text(song['author'], maxLines: 1),
-                            trailing: isDownloaded ? const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20) : null,
-                            onTap: () => appState.playPlaylist(allSongs, index, context: context),
+                            // 🔥 TEKLİ İNDİRME VEYA ONAY İKONU
+                            trailing: isDownloading
+                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2))
+                                : isDownloaded 
+                                  ? const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 24) 
+                                  : IconButton(
+                                      icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey),
+                                      onPressed: () => appState.downloadSpecificSong(song, context),
+                                    ),
+                            onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
                           );
                         },
                       ),
@@ -1084,91 +1145,104 @@ class PlayerScreen extends StatelessWidget {
         title: const Text("Şimdi Çalıyor", style: TextStyle(fontSize: 14, color: Colors.grey)),
         centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(song['thumbnail'] ?? '', width: MediaQuery.of(context).size.width - 48, height: MediaQuery.of(context).size.width - 48, fit: BoxFit.cover)),
-            const SizedBox(height: 32),
-            Text(song['title'] ?? '', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 8),
-            Text(song['author'] ?? '', style: const TextStyle(fontSize: 18, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 32),
-            StreamBuilder<Duration?>(
-              stream: appState.player.durationStream,
-              builder: (context, snapshot) {
-                final duration = snapshot.data ?? Duration.zero;
-                return StreamBuilder<Duration>(
-                  stream: appState.player.positionStream,
-                  builder: (context, snapshot) {
-                    var position = snapshot.data ?? Duration.zero;
-                    if (position > duration) position = duration;
-                    return Column(
-                      children: [
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(trackHeight: 4.0, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0), activeTrackColor: const Color(0xFF1DB954), inactiveTrackColor: Colors.grey[800], thumbColor: Colors.white),
-                          child: Slider(
-                            min: 0.0,
-                            max: duration.inMilliseconds.toDouble(),
-                            value: position.inMilliseconds.toDouble(),
-                            onChanged: (value) {
-                              appState.seekAudio(Duration(milliseconds: value.toInt()));
-                            },
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(formatDuration(position), style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                              Text(formatDuration(duration), style: const TextStyle(color: Colors.grey, fontSize: 12))
-                            ],
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(iconSize: 48, icon: const Icon(Icons.skip_previous, color: Colors.white), onPressed: () => appState.playPrevious()),
-                IconButton(iconSize: 64, icon: Icon(appState.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white), onPressed: () => appState.togglePlay()),
-                IconButton(iconSize: 48, icon: const Icon(Icons.skip_next, color: Colors.white), onPressed: () => appState.playNext()),
-              ],
-            ),
-            const SizedBox(height: 32),
-            Row(
-              children: [
-                const Icon(Icons.volume_down, color: Colors.grey),
-                Expanded(
-                  child: StreamBuilder<double>(
-                    stream: appState.player.volumeStream,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(song['thumbnail'] ?? '', width: MediaQuery.of(context).size.width - 48, height: MediaQuery.of(context).size.width - 48, fit: BoxFit.cover)),
+              const SizedBox(height: 32),
+              Text(song['title'] ?? '', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 8),
+              Text(song['author'] ?? '', style: const TextStyle(fontSize: 18, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 32),
+              StreamBuilder<Duration?>(
+                stream: appState.player.durationStream,
+                builder: (context, snapshot) {
+                  final duration = snapshot.data ?? Duration.zero;
+                  return StreamBuilder<Duration>(
+                    stream: appState.player.positionStream,
                     builder: (context, snapshot) {
-                      final volume = snapshot.data ?? 1.0;
-                      return SliderTheme(
-                        data: SliderTheme.of(context).copyWith(trackHeight: 2.0, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0), activeTrackColor: Colors.white, inactiveTrackColor: Colors.grey[800], thumbColor: Colors.white),
-                        child: Slider(
-                          min: 0.0,
-                          max: 1.0,
-                          value: volume,
-                          onChanged: (value) {
-                            appState.setVolume(value);
-                          },
-                        ),
+                      var position = snapshot.data ?? Duration.zero;
+                      if (position > duration) position = duration;
+                      return Column(
+                        children: [
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(trackHeight: 4.0, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0), activeTrackColor: const Color(0xFF1DB954), inactiveTrackColor: Colors.grey[800], thumbColor: Colors.white),
+                            child: Slider(
+                              min: 0.0,
+                              max: duration.inMilliseconds.toDouble(),
+                              value: position.inMilliseconds.toDouble(),
+                              onChanged: (value) {
+                                appState.seekAudio(Duration(milliseconds: value.toInt()));
+                              },
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(formatDuration(position), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                Text(formatDuration(duration), style: const TextStyle(color: Colors.grey, fontSize: 12))
+                              ],
+                            ),
+                          ),
+                        ],
                       );
                     },
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              // 🔥 YENİ OYNATICI KONTROL PANELİ (Tekrar ve Karıştır butonları eklendi)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    iconSize: 28, 
+                    icon: Icon(Icons.shuffle, color: appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey), 
+                    onPressed: () => appState.toggleShuffle()
                   ),
-                ),
-                const Icon(Icons.volume_up, color: Colors.grey),
-              ],
-            ),
-          ],
+                  IconButton(iconSize: 48, icon: const Icon(Icons.skip_previous, color: Colors.white), onPressed: () => appState.playPrevious()),
+                  IconButton(iconSize: 64, icon: Icon(appState.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white), onPressed: () => appState.togglePlay()),
+                  IconButton(iconSize: 48, icon: const Icon(Icons.skip_next, color: Colors.white), onPressed: () => appState.playNext()),
+                  IconButton(
+                    iconSize: 28, 
+                    icon: Icon(appState.isRepeat ? Icons.repeat_one : Icons.repeat, color: appState.isRepeat ? const Color(0xFF1DB954) : Colors.grey), 
+                    onPressed: () => appState.toggleRepeat()
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+              Row(
+                children: [
+                  const Icon(Icons.volume_down, color: Colors.grey),
+                  Expanded(
+                    child: StreamBuilder<double>(
+                      stream: appState.player.volumeStream,
+                      builder: (context, snapshot) {
+                        final volume = snapshot.data ?? 1.0;
+                        return SliderTheme(
+                          data: SliderTheme.of(context).copyWith(trackHeight: 2.0, thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6.0), activeTrackColor: Colors.white, inactiveTrackColor: Colors.grey[800], thumbColor: Colors.white),
+                          child: Slider(
+                            min: 0.0,
+                            max: 1.0,
+                            value: volume,
+                            onChanged: (value) {
+                              appState.setVolume(value);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const Icon(Icons.volume_up, color: Colors.grey),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
