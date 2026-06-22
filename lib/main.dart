@@ -137,6 +137,12 @@ class MyAppState extends ChangeNotifier {
     _libraryBox.put('custom_playlists', _playlists);
     notifyListeners();
   }
+  void deletePlaylist(String playlistName)
+  {
+    _playlists.remove(playlistName);
+    _libraryBox.put('custom_playlists', _playlists);
+    notifyListeners();
+  }
 
   void reorderDownloadedSongs(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex -= 1;
@@ -980,6 +986,15 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                   icon: const Icon(Icons.shuffle),
                   label: Text(appState.isShuffle ? "Karışık (Açık)" : "Karışık (Kapalı)"),
                   onPressed: allSongs.isEmpty ? null : () => appState.toggleShuffle(),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
+                  icon: const Icon(Icons.delete),
+                  label: const Text("Sil"),
+                  onPressed: () {
+                    appState.deletePlaylist(widget.playlistName);
+                    Navigator.pop(context);
+                    },
                 ),
               ],
             ),
