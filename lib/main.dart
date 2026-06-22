@@ -1,19 +1,17 @@
 import 'dart:io';
-import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:just_audio_background/just_audio_background.dart'; // YENİ: Arka Plan Paketi
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:namer_app/youtube_service.dart';
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  await dotenv.load(fileName: ".env"); // YENİ: Gizli dosyayı yüklüyoruz
   
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
@@ -55,6 +53,8 @@ class MyApp extends StatelessWidget {
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
 
+  final YouTubeMusicService _musicService = YouTubeMusicService();
+
   Map<dynamic, dynamic> _playlists = {};
   List<Map<dynamic, dynamic>> _downloadedSongs = [];
   List<Map<dynamic, dynamic>> _recentSongs = [];
@@ -62,8 +62,6 @@ class MyAppState extends ChangeNotifier {
   Map<dynamic, dynamic> get playlists => _playlists;
   List<Map<dynamic, dynamic>> get downloadedSongs => _downloadedSongs;
   List<Map<dynamic, dynamic>> get recentSongs => _recentSongs;
-
-  final String _backendUrl = dotenv.env['BACKEND_URL']!;
 
   bool _isSearching = false;
   bool _isAudioLoading = false;
@@ -133,9 +131,7 @@ class MyAppState extends ChangeNotifier {
   }
 
   void reorderPlaylist(String playlistName, int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
-    }
+    if (newIndex > oldIndex) newIndex -= 1;
     final item = _playlists[playlistName].removeAt(oldIndex);
     _playlists[playlistName].insert(newIndex, item);
     _libraryBox.put('custom_playlists', _playlists);
@@ -143,9 +139,7 @@ class MyAppState extends ChangeNotifier {
   }
 
   void reorderDownloadedSongs(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
-    }
+    if (newIndex > oldIndex) newIndex -= 1;
     final item = _downloadedSongs.removeAt(oldIndex);
     _downloadedSongs.insert(newIndex, item);
     _libraryBox.put('downloaded_songs', _downloadedSongs);
@@ -155,9 +149,7 @@ class MyAppState extends ChangeNotifier {
   void addToRecents(Map<dynamic, dynamic> song) {
     _recentSongs.removeWhere((s) => s['id'] == song['id']);
     _recentSongs.insert(0, song);
-    if (_recentSongs.length > 10) {
-      _recentSongs.removeLast();
-    }
+    if (_recentSongs.length > 10) _recentSongs.removeLast();
     _libraryBox.put('recent_songs', _recentSongs);
     notifyListeners();
   }
@@ -168,21 +160,17 @@ class MyAppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 🔥 YENİ ARAMA FONKSİYONU: Hızlı ve sorunsuz API sorgusu
   Future<void> performSearch(String query) async {
-    if (query.isEmpty) {
-      return;
-    }
+    if (query.isEmpty) return;
     _isSearching = true;
     notifyListeners();
+
     try {
-      final response = await http.get(Uri.parse('$_backendUrl/search?query=${Uri.encodeComponent(query)}'));
-      if (response.statusCode == 200) {
-        _searchResults = json.decode(response.body)['results'];
-      } else {
-        _searchResults = [];
-      }
-    } catch (_) {
-      _searchResults = [];
+      _searchResults = await _musicService.searchMusic(query);
+    } catch (e) {
+      debugPrint("❌ Arama Hatası: $e");
+      _searchResults = []; // Hata durumunda boş liste döndür
     } finally {
       _isSearching = false;
       notifyListeners();
@@ -232,17 +220,13 @@ class MyAppState extends ChangeNotifier {
   }
 
   void playPlaylist(List songs, int startIndex, {BuildContext? context}) {
-    if (songs.isEmpty) {
-      return;
-    }
+    if (songs.isEmpty) return;
     _queue = List<Map<dynamic, dynamic>>.from(songs);
 
     if (_isShuffle) {
       _shuffledIndices = List.generate(_queue.length, (i) => i)..shuffle();
       _shuffledPointer = _shuffledIndices.indexOf(startIndex);
-      if (_shuffledPointer == -1) {
-        _shuffledPointer = 0;
-      }
+      if (_shuffledPointer == -1) _shuffledPointer = 0;
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
       _queueIndex = startIndex;
@@ -251,59 +235,47 @@ class MyAppState extends ChangeNotifier {
   }
 
   void playNext({BuildContext? context}) {
-    if (_queue.isEmpty) {
-      return;
-    }
+    if (_queue.isEmpty) return;
 
     if (_isShuffle) {
       _shuffledPointer++;
-      // GÜNCELLENDİ: Karışık çalarken liste bittiyse (Tur tamamlandıysa) sonsuz döngüye girme, Oynatmayı durdur!
       if (_shuffledPointer >= _shuffledIndices.length) {
         _shuffledPointer = 0;
-        _queueIndex = _shuffledIndices[0]; // Yeniden başlatılırsa başa dönsün
+        _queueIndex = _shuffledIndices[0];
         _audioPlayer.stop();
         _isPlaying = false;
         notifyListeners();
-        return; // Durdur!
+        return;
       }
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
       _queueIndex++;
-      // GÜNCELLENDİ: Sırayla çalarken liste bittiyse sonsuz döngüye girme, Oynatmayı durdur!
       if (_queueIndex >= _queue.length) {
         _queueIndex = 0;
         _audioPlayer.stop();
         _isPlaying = false;
         notifyListeners();
-        return; // Durdur!
+        return;
       }
     }
     _playCurrentQueueItem(context: context);
   }
 
   void playPrevious({BuildContext? context}) {
-    if (_queue.isEmpty) {
-      return;
-    }
+    if (_queue.isEmpty) return;
     if (_isShuffle) {
       _shuffledPointer--;
-      if (_shuffledPointer < 0) {
-        _shuffledPointer = _shuffledIndices.length - 1;
-      }
+      if (_shuffledPointer < 0) _shuffledPointer = _shuffledIndices.length - 1;
       _queueIndex = _shuffledIndices[_shuffledPointer];
     } else {
       _queueIndex--;
-      if (_queueIndex < 0) {
-        _queueIndex = 0;
-      }
+      if (_queueIndex < 0) _queueIndex = 0;
     }
     _playCurrentQueueItem(context: context);
   }
 
   Future<void> _playCurrentQueueItem({BuildContext? context}) async {
-    if (_queue.isEmpty || _queueIndex >= _queue.length) {
-      return;
-    }
+    if (_queue.isEmpty || _queueIndex >= _queue.length) return;
 
     var song = _queue[_queueIndex];
     _currentSong = song;
@@ -312,10 +284,9 @@ class MyAppState extends ChangeNotifier {
 
     var dlMatch = _downloadedSongs.firstWhere((s) => s['id'] == song['id'], orElse: () => {});
 
-    // YENİ: Bildirim paneli (Background Audio) için müzik bilgilerini (MediaItem) oluşturuyoruz
     final mediaItem = MediaItem(
       id: song['id'],
-      album: "My Music App",
+      album: "VibeFlow",
       title: song['title'],
       artist: song['author'],
       artUri: Uri.parse(song['thumbnail']),
@@ -325,26 +296,30 @@ class MyAppState extends ChangeNotifier {
       if (dlMatch.isNotEmpty) {
         File file = File(dlMatch['path']);
         if (await file.exists()) {
-          // Bildirim bilgisini müzikle birleştirerek çal
           await _audioPlayer.setAudioSource(AudioSource.file(dlMatch['path'], tag: mediaItem));
           _audioPlayer.play();
         } else {
           throw Exception("Dosya bozuk.");
         }
       } else {
-        String streamUrl = "$_backendUrl/stream/${song['id']}";
-        // Bildirim bilgisini internet akışıyla birleştirerek çal
-        await _audioPlayer.setAudioSource(AudioSource.uri(Uri.parse(streamUrl), tag: mediaItem));
+        // İŞTE SPOTUBE YÖNTEMİ: Web yerine doğrudan Mobil API'leri kullan!
+        var audioStreamInfo = await _musicService.getAudioStream(song['id']);
+
+        // Kılık değiştirme başlıklarını sildik, artık doğrudan linki veriyoruz
+        await _audioPlayer.setAudioSource(
+          AudioSource.uri(
+            Uri.parse(audioStreamInfo.url.toString()), 
+            tag: mediaItem
+          )
+        );
         _audioPlayer.play();
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint("Çalma Hatası: $e");
       final localContext = context;
       if (localContext != null && localContext.mounted) {
         ScaffoldMessenger.of(localContext).showSnackBar(
-          SnackBar(
-            content: Text("${song['title']} atlandı (İnternet veya dosya hatası)"),
-            duration: const Duration(seconds: 1),
-          ),
+          SnackBar(content: Text("${song['title']} atlandı (Hata: Bağlantı)"), duration: const Duration(seconds: 1)),
         );
       }
       playNext(context: context);
@@ -365,11 +340,10 @@ class MyAppState extends ChangeNotifier {
     }
   }
 
+  // İndirme fonksiyonunu da servise bağlayalım
   Future<void> downloadSpecificSong(Map<dynamic, dynamic> songToDownload, BuildContext context) async {
     final targetId = songToDownload['id'];
-    if (_downloadedSongs.any((s) => s['id'] == targetId) || _downloadingSongId != null) {
-      return;
-    }
+    if (_downloadedSongs.any((s) => s['id'] == targetId) || _downloadingSongId != null) return;
 
     _downloadingSongId = targetId;
     notifyListeners();
@@ -377,40 +351,32 @@ class MyAppState extends ChangeNotifier {
     File? file;
     IOSink? fileStream;
     try {
-      String streamUrl = "$_backendUrl/stream/$targetId";
+      var stream = await _musicService.getStream(targetId);
+
       var tempDir = await getTemporaryDirectory();
-      String filePath = '${tempDir.path}/$targetId.mp4';
+      String filePath = '${tempDir.path}/$targetId.m4a'; // Direkt kaliteli format
       file = File(filePath);
+      
+      fileStream = file.openWrite();
+      await stream.pipe(fileStream);
+      await fileStream.flush();
+      await fileStream.close();
 
-      final response = await http.Client().send(http.Request('GET', Uri.parse(streamUrl))).timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200 || response.statusCode == 307) {
-        fileStream = file.openWrite();
-        await response.stream.pipe(fileStream);
-        await fileStream.flush();
-        await fileStream.close();
-
-        final savedSong = Map<dynamic, dynamic>.from(songToDownload);
-        savedSong['path'] = filePath;
-        _downloadedSongs.add(savedSong);
-        _libraryBox.put('downloaded_songs', _downloadedSongs);
-        
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Şarkı başarıyla indirildi!"), backgroundColor: Color(0xFF1DB954)),
-        );
-      }
-    } catch (_) {
-      if (fileStream != null) {
-        await fileStream.close();
-      }
-      if (file != null && await file.exists()) {
-        await file.delete();
-      }
+      final savedSong = Map<dynamic, dynamic>.from(songToDownload);
+      savedSong['path'] = filePath;
+      _downloadedSongs.add(savedSong);
+      _libraryBox.put('downloaded_songs', _downloadedSongs);
+      
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Şarkı başarıyla indirildi!"), backgroundColor: Color(0xFF1DB954)),
+      );
+    } catch (e) {
+      debugPrint("İndirme Hatası: $e");
+      if (fileStream != null) await fileStream.close();
+      if (file != null && await file.exists()) await file.delete();
     } finally {
-      if (_downloadingSongId == targetId) {
-        _downloadingSongId = null;
-      }
+      if (_downloadingSongId == targetId) _downloadingSongId = null;
       notifyListeners();
     }
   }
@@ -420,9 +386,7 @@ class MyAppState extends ChangeNotifier {
     if (songIndex != -1) {
       try {
         final file = File(_downloadedSongs[songIndex]['path']);
-        if (await file.exists()) {
-          await file.delete();
-        }
+        if (await file.exists()) await file.delete();
       } catch (_) {}
       _downloadedSongs.removeAt(songIndex);
       _libraryBox.put('downloaded_songs', _downloadedSongs);
@@ -432,10 +396,15 @@ class MyAppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _musicService.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
 }
+
+// =========================================================================
+// UI WIDGETS (Arayüz Kodların Aynen Korunmuştur)
+// =========================================================================
 
 void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<dynamic, dynamic> songToSave) {
   showModalBottomSheet(
@@ -504,9 +473,9 @@ class _MyHomePageState extends State<MyHomePage> {
         indicatorColor: const Color(0xFF1DB954).withValues(alpha: 0.3),
         selectedIndex: selectedIndex,
         destinations: const <Widget>[
-          NavigationDestination(selectedIcon: Icon(Icons.home, color: Colors.white), icon: Icon(Icons.home_outlined, color: Colors.grey), label: 'Home'),
-          NavigationDestination(selectedIcon: Icon(Icons.search, color: Colors.white), icon: Icon(Icons.search_outlined, color: Colors.grey), label: 'Search'),
-          NavigationDestination(selectedIcon: Icon(Icons.library_music, color: Colors.white), icon: Icon(Icons.library_music_outlined, color: Colors.grey), label: 'Library')
+          NavigationDestination(selectedIcon: Icon(Icons.home, color: Colors.white), icon: Icon(Icons.home_outlined, color: Colors.grey), label: 'Anasayfa'),
+          NavigationDestination(selectedIcon: Icon(Icons.search, color: Colors.white), icon: Icon(Icons.search_outlined, color: Colors.grey), label: 'Ara'),
+          NavigationDestination(selectedIcon: Icon(Icons.library_music, color: Colors.white), icon: Icon(Icons.library_music_outlined, color: Colors.grey), label: 'Kütüphane')
         ],
       ),
     );
@@ -522,7 +491,6 @@ class MiniPlayer extends StatelessWidget {
     final song = appState.currentSong;
     final hasSong = song != null;
     
-    // GÜVENLİ KONTROLLER
     final isDownloaded = hasSong && appState.downloadedSongs.any((s) => s['id'] == song['id']);
     final isDownloading = hasSong && appState.downloadingSongId == song['id'];
 
@@ -553,8 +521,6 @@ class MiniPlayer extends StatelessWidget {
               ),
             ),
           ),
-          
-          // YENİDEN EKLENDİ: Mini Player İndirme Butonu
           if (isDownloading)
             const Padding(padding: EdgeInsets.symmetric(horizontal: 8.0), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Color(0xFF1DB954), strokeWidth: 2)))
           else if (hasSong && !isDownloaded && !appState.isAudioLoading)
@@ -565,7 +531,6 @@ class MiniPlayer extends StatelessWidget {
           else if (isDownloaded)
             const Padding(padding: EdgeInsets.symmetric(horizontal: 16.0), child: Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 24)),
 
-          // Durdur / Oynat Butonu (Üçgen)
           IconButton(
             icon: Icon(appState.isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 32),
             onPressed: (hasSong && !appState.isAudioLoading) ? () => appState.togglePlay() : null
@@ -848,7 +813,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                         buildDefaultDragHandles: false,
                         padding: const EdgeInsets.all(8),
                         itemCount: allSongs.length,
-                        onReorder: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
+                        onReorderItem: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
                           return ReorderableDragStartListener(
@@ -1028,7 +993,7 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                         buildDefaultDragHandles: false,
                         padding: const EdgeInsets.all(8),
                         itemCount: allSongs.length,
-                        onReorder: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
+                        onReorderItem: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
                         itemBuilder: (context, index) {
                           final song = allSongs[index];
                           return ReorderableDragStartListener(
@@ -1083,9 +1048,7 @@ class PlayerScreen extends StatelessWidget {
   const PlayerScreen({super.key});
 
   String formatDuration(Duration? duration) {
-    if (duration == null) {
-      return "0:00";
-    }
+    if (duration == null) return "0:00";
     String twoDigits(int n) => n.toString().padLeft(2, "0");
     return "${duration.inHours > 0 ? '${duration.inHours}:' : ''}${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}";
   }
@@ -1125,9 +1088,7 @@ class PlayerScreen extends StatelessWidget {
                   stream: appState.player.positionStream,
                   builder: (context, snapshot) {
                     var position = snapshot.data ?? Duration.zero;
-                    if (position > duration) {
-                      position = duration;
-                    }
+                    if (position > duration) position = duration;
                     return Column(
                       children: [
                         SliderTheme(

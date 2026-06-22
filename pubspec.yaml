@@ -17,10 +17,9 @@ dependencies:
   hive_flutter: ^1.1.0
   youtube_explode_dart: ^3.1.0
   path_provider: ^2.1.6
-  http: ^1.6.0
   just_audio_background: ^0.0.1-beta.17
   flutter_launcher_icons: ^0.14.4
-  flutter_dotenv: ^6.0.1
+  ytmusicapi_dart: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -29,8 +28,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - .env
 
 flutter_launcher_icons:
   android: true
