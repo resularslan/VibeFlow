@@ -15,6 +15,7 @@ Future<void> main() async {
     androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
     androidNotificationChannelName: 'Müzik Çalar',
     androidNotificationOngoing: true,
+    androidStopForegroundOnPause: true,
   );
 
   await Hive.initFlutter();
@@ -85,6 +86,10 @@ class MyAppState extends ChangeNotifier {
   Map<dynamic, dynamic>? _currentSong;
   List<int> _shuffledIndices = [];
   int _shuffledPointer = 0;
+
+  // 🔥 ARKA PLAN ÖNBELLEK DEĞİŞKENLERİ
+  String? _prefetchedSongId;
+  AudioSource? _prefetchedNextSource;
 
   bool get isPlaying => _isPlaying;
   bool get isShuffle => _isShuffle;
@@ -217,11 +222,13 @@ class MyAppState extends ChangeNotifier {
       }
       _shuffledPointer = 0;
     }
+    _preloadNextSong(); // Sıra değiştiği için önbelleği hemen güncelle
     notifyListeners();
   }
 
   void toggleRepeat() {
     _isRepeat = !_isRepeat;
+    _preloadNextSong(); // Sıra değişme ihtimaline karşı önbelleği güncelle
     notifyListeners();
   }
 
@@ -310,6 +317,65 @@ class MyAppState extends ChangeNotifier {
     _playCurrentQueueItem(context: context);
   }
 
+  // 🔥 SIRADAKİ ŞARKIYI GİZLİCE HAZIRLAYAN ALGORİTMA
+  Future<void> _preloadNextSong() async {
+    if (_queue.isEmpty) return;
+
+    int nextIndex;
+    if (_isShuffle) {
+      int tempPointer = _shuffledPointer + 1;
+      if (tempPointer >= _shuffledIndices.length) {
+        if (_isRepeat) {
+          nextIndex = _shuffledIndices[0]; 
+        } else {
+          return; 
+        }
+      } else {
+        nextIndex = _shuffledIndices[tempPointer];
+      }
+    } else {
+      nextIndex = _queueIndex + 1;
+      if (nextIndex >= _queue.length) {
+        if (_isRepeat) {
+          nextIndex = 0;
+        } else {
+          return; 
+        }
+      }
+    }
+
+    var nextSong = _queue[nextIndex];
+    String nextId = nextSong['id'];
+
+    var dlMatch = _downloadedSongs.firstWhere((s) => s['id'] == nextId, orElse: () => {});
+    
+    final nextMediaItem = MediaItem(
+      id: nextSong['id'],
+      album: "VibeFlow",
+      title: nextSong['title'],
+      artist: nextSong['author'],
+      artUri: Uri.parse(nextSong['thumbnail']),
+    );
+
+    if (dlMatch.isNotEmpty) {
+      _prefetchedSongId = nextId;
+      _prefetchedNextSource = AudioSource.file(dlMatch['path'], tag: nextMediaItem);
+      return;
+    }
+
+    try {
+      var audioStreamInfo = await _musicService.getAudioStream(nextId);
+      _prefetchedNextSource = AudioSource.uri(
+        Uri.parse(audioStreamInfo.url.toString()), 
+        tag: nextMediaItem
+      );
+      _prefetchedSongId = nextId;
+    } catch (e) {
+      _prefetchedSongId = null;
+      _prefetchedNextSource = null;
+    }
+  }
+
   Future<void> _playCurrentQueueItem({BuildContext? context}) async {
     if (_queue.isEmpty || _queueIndex >= _queue.length) return;
 
@@ -317,8 +383,6 @@ class MyAppState extends ChangeNotifier {
     _currentSong = song;
     _isAudioLoading = true;
     notifyListeners();
-
-    var dlMatch = _downloadedSongs.firstWhere((s) => s['id'] == song['id'], orElse: () => {});
 
     final mediaItem = MediaItem(
       id: song['id'],
@@ -329,24 +393,36 @@ class MyAppState extends ChangeNotifier {
     );
 
     try {
+      AudioSource? sourceToPlay;
+      var dlMatch = _downloadedSongs.firstWhere((s) => s['id'] == song['id'], orElse: () => {});
+
       if (dlMatch.isNotEmpty) {
         File file = File(dlMatch['path']);
         if (await file.exists()) {
-          await _audioPlayer.setAudioSource(AudioSource.file(dlMatch['path'], tag: mediaItem));
-          _audioPlayer.play();
+          sourceToPlay = AudioSource.file(dlMatch['path'], tag: mediaItem);
         } else {
           throw Exception("Dosya bozuk.");
         }
-      } else {
+      } 
+      // 🔥 EĞER ŞARKI ÖNBELLEĞE ALINMIŞSA AĞ İSTEĞİ YAPMADAN DİREKT BAŞLAT
+      else if (_prefetchedSongId == song['id'] && _prefetchedNextSource != null) {
+        sourceToPlay = _prefetchedNextSource;
+      } 
+      // 🔥 İLK ŞARKI VEYA KULLANICI ELLE BİR ŞARKI SEÇTİYSE NORMAL YÜKLE
+      else {
         var audioStreamInfo = await _musicService.getAudioStream(song['id']);
-        await _audioPlayer.setAudioSource(
-          AudioSource.uri(
-            Uri.parse(audioStreamInfo.url.toString()), 
-            tag: mediaItem
-          )
+        sourceToPlay = AudioSource.uri(
+          Uri.parse(audioStreamInfo.url.toString()), 
+          tag: mediaItem
         );
-        _audioPlayer.play();
       }
+
+      await _audioPlayer.setAudioSource(sourceToPlay!);
+      _audioPlayer.play();
+
+      // Şarkı başlar başlamaz arka planda hemen bir sonrakini hazırlamaya başla
+      _preloadNextSong();
+
     } catch (e) {
       debugPrint("Çalma Hatası: $e");
       final localContext = context;
@@ -456,10 +532,10 @@ void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<d
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.grey[900],
-    isScrollControlled: true, // Daha iyi boyutlandırma için eklendi
-    useSafeArea: true, // 🔥 SİSTEM ÇUBUĞUYLA ÇAKIŞMAYI KÖKTEN ÇÖZER
+    isScrollControlled: true, 
+    useSafeArea: true, 
     builder: (context) {
-      return SafeArea( // 🔥 YUKARI VE AŞAĞIDAKİ SİSTEM BOŞLUKLARINA SAYGI DUYAR
+      return SafeArea( 
         child: Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 16),
           child: ListView(
@@ -861,13 +937,11 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                           buildDefaultDragHandles: false,
                           padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
                           itemCount: allSongs.length,
-                          // 🔥 INDEX YERİNE DOĞRUDAN EVENT KULLANILDI (Sıralama Hatasının Çözümü)
-                          onReorderItem: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
+                          onReorder: (oldIndex, newIndex) => appState.reorderDownloadedSongs(oldIndex, newIndex),
                           itemBuilder: (context, index) {
                             final song = allSongs[index];
                             return ReorderableDragStartListener(
                               index: index,
-                              // 🔥 HATA BURADAYDI: Key içinden indeks ($index) numarası SİLİNDİ!
                               key: ValueKey("dl_${song['id']}"),
                               child: ListTile(
                                 contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
@@ -943,7 +1017,12 @@ class LibraryPage extends StatelessWidget {
                   return AlertDialog(
                     backgroundColor: Colors.grey[900],
                     title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)),
-                    content: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
+                    content: SafeArea(
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                        child: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
+                      ),
+                    ),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Iptal', style: TextStyle(color: Colors.grey))),
                       TextButton(
@@ -1058,13 +1137,11 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                           buildDefaultDragHandles: false,
                           padding: EdgeInsets.only(top: 8, left: 8, right: 8, bottom: MediaQuery.of(context).padding.bottom + 80),
                           itemCount: allSongs.length,
-                          // 🔥 DOĞRU PARAMETRE KULLANIMI
-                          onReorderItem: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
+                          onReorder: (oldIndex, newIndex) => appState.reorderPlaylist(widget.playlistName, oldIndex, newIndex),
                           itemBuilder: (context, index) {
                             final song = allSongs[index];
                             return ReorderableDragStartListener(
                               index: index,
-                              // 🔥 HATA BURADAYDI: Key içinden indeks ($index) numarası SİLİNDİ!
                               key: ValueKey("pl_${song['id']}"),
                               child: ListTile(
                                 contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
