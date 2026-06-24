@@ -1017,10 +1017,7 @@ class LibraryPage extends StatelessWidget {
                   return AlertDialog(
                     backgroundColor: Colors.grey[900],
                     title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)),
-                    content: Padding(
-                        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-                        child: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
-                      ),
+                    content: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Iptal', style: TextStyle(color: Colors.grey))),
                       TextButton(
