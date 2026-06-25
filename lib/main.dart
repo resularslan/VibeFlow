@@ -1167,21 +1167,16 @@ class LibraryPage extends StatelessWidget {
                   final TextEditingController controller = TextEditingController();
                   return AlertDialog(
                     backgroundColor: Colors.grey[900],
-                    title: Text(appState.t('new_playlist'), style: const TextStyle(color: Colors.white)),
-                    content: SafeArea(
-                      child: Padding(
-                        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-                        child: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
-                      ),
-                    ),
+                    title: Text(appState.t('new_playlist'), style: TextStyle(color: Colors.white)),
+                    content: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: Text(appState.t('cancel'), style: const TextStyle(color: Colors.grey))),
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Iptal', style: TextStyle(color: Colors.grey))),
                       TextButton(
                         onPressed: () {
                           appState.createPlaylist(controller.text);
                           Navigator.pop(context);
                         },
-                        child: Text(appState.t('create'), style: const TextStyle(color: Color(0xFF1DB954))),
+                        child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954))),
                       )
                     ],
                   );
