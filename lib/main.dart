@@ -13,7 +13,7 @@ Future<void> main() async {
   
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
-    androidNotificationChannelName: 'Müzik Çalar',
+    androidNotificationChannelName: 'VibeFlow',
     androidNotificationOngoing: true,
     androidStopForegroundOnPause: true,
   );
@@ -51,8 +51,11 @@ class MyApp extends StatelessWidget {
 
 class MyAppState extends ChangeNotifier {
   final _libraryBox = Hive.box('libraryBox');
-
   final YouTubeMusicService _musicService = YouTubeMusicService();
+
+  String _language = 'tr';
+  String get language => _language;
+  String t(String key) => AppTranslations.get(_language, key);
 
   Map<dynamic, dynamic> _playlists = {};
   List<Map<dynamic, dynamic>> _downloadedSongs = [];
@@ -87,7 +90,8 @@ class MyAppState extends ChangeNotifier {
   List<int> _shuffledIndices = [];
   int _shuffledPointer = 0;
 
-  // 🔥 ARKA PLAN ÖNBELLEK DEĞİŞKENLERİ
+  String? _currentPlaylistName;
+
   String? _prefetchedSongId;
   AudioSource? _prefetchedNextSource;
 
@@ -102,10 +106,20 @@ class MyAppState extends ChangeNotifier {
   }
 
   void _loadData() {
+    _language = _libraryBox.get('language', defaultValue: 'tr');
     _playlists = Map<dynamic, dynamic>.from(_libraryBox.get('custom_playlists', defaultValue: {}));
     _downloadedSongs = List<Map<dynamic, dynamic>>.from(_libraryBox.get('downloaded_songs', defaultValue: []));
     _recentSongs = List<Map<dynamic, dynamic>>.from(_libraryBox.get('recent_songs', defaultValue: []));
     notifyListeners();
+  }
+
+  // 🔥 Seçili dili ayarlayan yeni fonksiyon
+  void setLanguage(String lang) {
+    if (_language != lang) {
+      _language = lang;
+      _libraryBox.put('language', _language);
+      notifyListeners();
+    }
   }
 
   void createPlaylist(String name) {
@@ -122,6 +136,14 @@ class MyAppState extends ChangeNotifier {
       if (!songs.any((s) => s['id'] == songToAdd['id'])) {
         songs.add(songToAdd);
         _libraryBox.put('custom_playlists', _playlists);
+        
+        if (_currentPlaylistName == playlistName) {
+          _queue.add(songToAdd);
+          if (_isShuffle) {
+            _shuffledIndices.add(_queue.length - 1);
+          }
+          _preloadNextSong();
+        }
         notifyListeners();
       }
     }
@@ -139,6 +161,9 @@ class MyAppState extends ChangeNotifier {
   void deletePlaylist(String playlistName) {
     _playlists.remove(playlistName);
     _libraryBox.put('custom_playlists', _playlists);
+    if (_currentPlaylistName == playlistName) {
+      _currentPlaylistName = null;
+    }
     notifyListeners();
   }
 
@@ -222,13 +247,13 @@ class MyAppState extends ChangeNotifier {
       }
       _shuffledPointer = 0;
     }
-    _preloadNextSong(); // Sıra değiştiği için önbelleği hemen güncelle
+    _preloadNextSong(); 
     notifyListeners();
   }
 
   void toggleRepeat() {
     _isRepeat = !_isRepeat;
-    _preloadNextSong(); // Sıra değişme ihtimaline karşı önbelleği güncelle
+    _preloadNextSong(); 
     notifyListeners();
   }
 
@@ -242,11 +267,13 @@ class MyAppState extends ChangeNotifier {
     };
     _queue = [mapVideo];
     _queueIndex = 0;
+    _currentPlaylistName = null; 
     _playCurrentQueueItem(context: context);
   }
 
-  void playPlaylist(List songs, {BuildContext? context, int? startIndex}) {
+  void playPlaylist(List songs, {BuildContext? context, int? startIndex, String? playlistName}) {
     if (songs.isEmpty) return;
+    _currentPlaylistName = playlistName; 
     _queue = List<Map<dynamic, dynamic>>.from(songs);
 
     if (_isShuffle) {
@@ -317,7 +344,6 @@ class MyAppState extends ChangeNotifier {
     _playCurrentQueueItem(context: context);
   }
 
-  // 🔥 SIRADAKİ ŞARKIYI GİZLİCE HAZIRLAYAN ALGORİTMA
   Future<void> _preloadNextSong() async {
     if (_queue.isEmpty) return;
 
@@ -401,14 +427,12 @@ class MyAppState extends ChangeNotifier {
         if (await file.exists()) {
           sourceToPlay = AudioSource.file(dlMatch['path'], tag: mediaItem);
         } else {
-          throw Exception("Dosya bozuk.");
+          throw Exception(t('file_corrupted'));
         }
       } 
-      // 🔥 EĞER ŞARKI ÖNBELLEĞE ALINMIŞSA AĞ İSTEĞİ YAPMADAN DİREKT BAŞLAT
       else if (_prefetchedSongId == song['id'] && _prefetchedNextSource != null) {
         sourceToPlay = _prefetchedNextSource;
       } 
-      // 🔥 İLK ŞARKI VEYA KULLANICI ELLE BİR ŞARKI SEÇTİYSE NORMAL YÜKLE
       else {
         var audioStreamInfo = await _musicService.getAudioStream(song['id']);
         sourceToPlay = AudioSource.uri(
@@ -419,8 +443,6 @@ class MyAppState extends ChangeNotifier {
 
       await _audioPlayer.setAudioSource(sourceToPlay!);
       _audioPlayer.play();
-
-      // Şarkı başlar başlamaz arka planda hemen bir sonrakini hazırlamaya başla
       _preloadNextSong();
 
     } catch (e) {
@@ -428,7 +450,7 @@ class MyAppState extends ChangeNotifier {
       final localContext = context;
       if (localContext != null && localContext.mounted) {
         ScaffoldMessenger.of(localContext).showSnackBar(
-          SnackBar(content: Text("${song['title']} atlandı (Hata: Bağlantı)"), duration: const Duration(seconds: 1)),
+          SnackBar(content: Text("${song['title']} ${t('skipped_error')}"), duration: const Duration(seconds: 1)),
         );
       }
       playNext(context: context);
@@ -474,9 +496,15 @@ class MyAppState extends ChangeNotifier {
       _downloadedSongs.add(savedSong);
       _libraryBox.put('downloaded_songs', _downloadedSongs);
       
+      if (_currentPlaylistName == "downloaded_songs") {
+        _queue.add(savedSong);
+        if (_isShuffle) _shuffledIndices.add(_queue.length - 1);
+        _preloadNextSong();
+      }
+
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Şarkı başarıyla indirildi!"), backgroundColor: Color(0xFF1DB954)),
+        SnackBar(content: Text(t('song_downloaded')), backgroundColor: const Color(0xFF1DB954)),
       );
     } catch (e) {
       debugPrint("İndirme Hatası: $e");
@@ -493,7 +521,7 @@ class MyAppState extends ChangeNotifier {
     if (songs.isEmpty) return;
     
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Liste indirmesi başlatıldı..."), backgroundColor: Color(0xFF1DB954)),
+      SnackBar(content: Text(t('playlist_download_started')), backgroundColor: const Color(0xFF1DB954)),
     );
 
     for (var song in songs) {
@@ -525,8 +553,99 @@ class MyAppState extends ChangeNotifier {
 }
 
 // =========================================================================
-// UI WIDGETS
+// UI WIDGETS VE TRANSLATIONS (ÇEVİRİLER)
 // =========================================================================
+
+class AppTranslations {
+  static const Map<String, Map<String, String>> keys = {
+    'tr': {
+      'welcome': 'Hoş Geldin',
+      'home_quiet': 'Henüz buralar çok sessiz.',
+      'home_create_first': 'Kütüphaneden ilk çalma listeni oluşturarak başlayabilirsin.',
+      'your_playlists': 'Senin Listelerin',
+      'search_title': 'Arama',
+      'search_hint': 'Ne dinlemek istiyorsun?',
+      'recent_songs': 'Son Çalınanlar',
+      'search_empty': 'Aramak istediğiniz şarkıyı yazın.',
+      'your_library': 'Kütüphanen',
+      'create_new_playlist': 'Yeni Çalma Listesi Oluştur',
+      'downloaded_songs': 'İndirilen Şarkılar',
+      'songs_offline_ready': 'şarkı • Çevrimdışı hazır',
+      'songs_count': 'Şarkı',
+      'play': 'Oynat',
+      'download_all': 'Tümünü İndir',
+      'delete': 'Sil',
+      'delete_playlist': 'Sil',
+      'playlist_empty': 'Bu liste boş.',
+      'now_playing': 'Şimdi Çalıyor',
+      'no_song': 'Şarkı Yok',
+      'no_song_selected': 'Henüz Şarkı Seçilmedi',
+      'connecting': 'Bağlanıyor...',
+      'saved_on_device': 'Cihazda Kayıtlı',
+      'online_stream': 'Çevrimiçi Akış',
+      'add_to_playlist': 'Çalma Listesine Ekle',
+      'create_playlist_first': 'Önce Kütüphane\'den bir liste oluşturun.',
+      'new_playlist': 'Yeni Çalma Listesi',
+      'cancel': 'İptal',
+      'create': 'Oluştur',
+      'home_tab': 'Anasayfa',
+      'search_tab': 'Ara',
+      'library_tab': 'Kütüphane',
+      'song_downloaded': 'Şarkı başarıyla indirildi!',
+      'playlist_download_started': 'Liste indirmesi başlatıldı...',
+      'added_to_playlist': 'listesine eklendi!',
+      'skipped_error': 'atlandı (Hata: Bağlantı)',
+      'no_downloaded_songs': 'Henüz indirilen şarkı yok.',
+      'file_corrupted': 'Dosya bozuk.',
+      'language_select': 'Dil',
+    },
+    'en': {
+      'welcome': 'Welcome',
+      'home_quiet': 'It\'s quiet here.',
+      'home_create_first': 'Start by creating your first playlist from the library.',
+      'your_playlists': 'Your Playlists',
+      'search_title': 'Search',
+      'search_hint': 'What do you want to listen to?',
+      'recent_songs': 'Recently Played',
+      'search_empty': 'Type the song you want to search.',
+      'your_library': 'Your Library',
+      'create_new_playlist': 'Create New Playlist',
+      'downloaded_songs': 'Downloaded Songs',
+      'songs_offline_ready': 'songs • Ready offline',
+      'songs_count': 'Songs',
+      'play': 'Play',
+      'download_all': 'Download All',
+      'delete': 'Delete',
+      'delete_playlist': 'Delete',
+      'playlist_empty': 'This playlist is empty.',
+      'now_playing': 'Now Playing',
+      'no_song': 'No Song',
+      'no_song_selected': 'No Song Selected',
+      'connecting': 'Connecting...',
+      'saved_on_device': 'Saved on Device',
+      'online_stream': 'Online Stream',
+      'add_to_playlist': 'Add to Playlist',
+      'create_playlist_first': 'Create a playlist from the Library first.',
+      'new_playlist': 'New Playlist',
+      'cancel': 'Cancel',
+      'create': 'Create',
+      'home_tab': 'Home',
+      'search_tab': 'Search',
+      'library_tab': 'Library',
+      'song_downloaded': 'Song downloaded successfully!',
+      'playlist_download_started': 'Playlist download started...',
+      'added_to_playlist': 'added to playlist!',
+      'skipped_error': 'skipped (Error: Connection)',
+      'no_downloaded_songs': 'No downloaded songs yet.',
+      'file_corrupted': 'File is corrupted.',
+      'language_select': 'Language',
+    }
+  };
+
+  static String get(String lang, String key) {
+    return keys[lang]?[key] ?? key;
+  }
+}
 
 void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<dynamic, dynamic> songToSave) {
   showModalBottomSheet(
@@ -542,10 +661,10 @@ void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<d
             shrinkWrap: true,
             padding: const EdgeInsets.all(16),
             children: [
-              const Text("Çalma Listesine Ekle", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              Text(appState.t('add_to_playlist'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
               const SizedBox(height: 16),
               if (appState.playlists.isEmpty)
-                const Padding(padding: EdgeInsets.all(16.0), child: Text("Önce Kütüphane'den bir liste oluşturun.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center))
+                Padding(padding: const EdgeInsets.all(16.0), child: Text(appState.t('create_playlist_first'), style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center))
               else
                 ...appState.playlists.keys.map((playlistName) {
                   return ListTile(
@@ -554,7 +673,7 @@ void showPlaylistSelectionSheet(BuildContext context, MyAppState appState, Map<d
                     onTap: () {
                       appState.addSongToPlaylist(playlistName, songToSave);
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'$playlistName' listesine eklendi!"), backgroundColor: const Color(0xFF1DB954)));
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("'$playlistName' ${appState.t('added_to_playlist')}"), backgroundColor: const Color(0xFF1DB954)));
                     },
                   );
                 }),
@@ -576,6 +695,8 @@ class _MyHomePageState extends State<MyHomePage> {
   var selectedIndex = 0;
   @override
   Widget build(BuildContext context) {
+    var appState = context.watch<MyAppState>();
+    
     Widget page;
     switch (selectedIndex) {
       case 0:
@@ -601,10 +722,10 @@ class _MyHomePageState extends State<MyHomePage> {
         backgroundColor: Colors.black,
         indicatorColor: const Color(0xFF1DB954).withValues(alpha: 0.3),
         selectedIndex: selectedIndex,
-        destinations: const <Widget>[
-          NavigationDestination(selectedIcon: Icon(Icons.home, color: Colors.white), icon: Icon(Icons.home_outlined, color: Colors.grey), label: 'Anasayfa'),
-          NavigationDestination(selectedIcon: Icon(Icons.search, color: Colors.white), icon: Icon(Icons.search_outlined, color: Colors.grey), label: 'Ara'),
-          NavigationDestination(selectedIcon: Icon(Icons.library_music, color: Colors.white), icon: Icon(Icons.library_music_outlined, color: Colors.grey), label: 'Kütüphane')
+        destinations: <Widget>[
+          NavigationDestination(selectedIcon: const Icon(Icons.home, color: Colors.white), icon: const Icon(Icons.home_outlined, color: Colors.grey), label: appState.t('home_tab')),
+          NavigationDestination(selectedIcon: const Icon(Icons.search, color: Colors.white), icon: const Icon(Icons.search_outlined, color: Colors.grey), label: appState.t('search_tab')),
+          NavigationDestination(selectedIcon: const Icon(Icons.library_music, color: Colors.white), icon: const Icon(Icons.library_music_outlined, color: Colors.grey), label: appState.t('library_tab'))
         ],
       ),
     );
@@ -643,9 +764,9 @@ class MiniPlayer extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(hasSong ? song['title'] : 'Henüz Şarkı Seçilmedi', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(hasSong ? song['title'] : appState.t('no_song_selected'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 2),
-                  Text(appState.isAudioLoading ? 'Bağlanıyor...' : (isDownloaded ? 'Cihazda Kayıtlı' : (hasSong ? 'Çevrimiçi Akış' : '')), style: const TextStyle(color: Color(0xFF1DB954), fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text(appState.isAudioLoading ? appState.t('connecting') : (isDownloaded ? appState.t('saved_on_device') : (hasSong ? appState.t('online_stream') : '')), style: const TextStyle(color: Color(0xFF1DB954), fontSize: 12, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -696,14 +817,14 @@ class _SearchPageState extends State<SearchPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Arama", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            Text(appState.t('search_title'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               height: 50,
               child: SearchBar(
                 controller: _searchController,
-                hintText: "Ne dinlemek istiyorsun?",
+                hintText: appState.t('search_hint'),
                 hintStyle: const WidgetStatePropertyAll<TextStyle>(TextStyle(color: Colors.grey)),
                 backgroundColor: WidgetStatePropertyAll<Color>(Colors.white.withValues(alpha: 0.1)),
                 padding: const WidgetStatePropertyAll<EdgeInsets>(EdgeInsets.symmetric(horizontal: 16.0)),
@@ -740,7 +861,7 @@ class _SearchPageState extends State<SearchPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (appState.recentSongs.isNotEmpty) ...[
-                          const Text("Son Çalınanlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(appState.t('recent_songs'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           const SizedBox(height: 8),
                           Expanded(
                             child: ListView.builder(
@@ -777,7 +898,7 @@ class _SearchPageState extends State<SearchPage> {
                             ),
                           ),
                         ] else
-                          Center(child: Text("Aramak istediğiniz şarkıyı yazın.", style: TextStyle(color: Colors.grey[500], fontSize: 16))),
+                          Center(child: Text(appState.t('search_empty'), style: TextStyle(color: Colors.grey[500], fontSize: 16))),
                       ],
                     )
                   : appState.isSearching
@@ -839,7 +960,37 @@ class HomePage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Hoş Geldin', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(appState.t('welcome'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                // 🔥 Yeni PopupMenuButton Tasarımı
+                PopupMenuButton<String>(
+                  initialValue: appState.language,
+                  onSelected: (String result) {
+                    appState.setLanguage(result);
+                  },
+                  color: Colors.grey[900],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(appState.t('language_select'), style: const TextStyle(color: Colors.white, fontSize: 16)),
+                      const Icon(Icons.arrow_drop_down, color: Colors.white),
+                    ],
+                  ),
+                  itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                    const PopupMenuItem<String>(
+                      value: 'tr',
+                      child: Text('Türkçe', style: TextStyle(color: Colors.white)),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'en',
+                      child: Text('English', style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
             if (appState.playlists.isEmpty)
               Container(
@@ -847,17 +998,17 @@ class HomePage extends StatelessWidget {
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(8)),
                 child: Column(
-                  children: const [
-                    Icon(Icons.queue_music, size: 48, color: Colors.grey),
-                    SizedBox(height: 16),
-                    Text("Henüz buralar çok sessiz.", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 8),
-                    Text("Kütüphaneden ilk çalma listeni oluşturarak başlayabilirsin.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center)
+                  children: [
+                    const Icon(Icons.queue_music, size: 48, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    Text(appState.t('home_quiet'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Text(appState.t('home_create_first'), style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center)
                   ],
                 ),
               )
             else ...[
-              const Text("Senin Listelerin", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              Text(appState.t('your_playlists'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(height: 16),
               GridView.builder(
                 shrinkWrap: true,
@@ -905,7 +1056,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("İndirilen Şarkılar"),
+        title: Text(appState.t('downloaded_songs')),
         backgroundColor: Colors.black,
         actions: [
           IconButton(icon: Icon(_isEditing ? Icons.check : Icons.edit, color: const Color(0xFF1DB954)), onPressed: () => setState(() => _isEditing = !_isEditing))
@@ -922,8 +1073,8 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
                     icon: const Icon(Icons.play_arrow),
-                    label: const Text("Oynat"),
-                    onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
+                    label: Text(appState.t('play')),
+                    onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context, playlistName: "downloaded_songs"),
                   ),
                 ],
               ),
@@ -931,7 +1082,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
             const Divider(color: Colors.grey),
             Expanded(
               child: allSongs.isEmpty
-                  ? Center(child: Text("Henüz indirilen şarkı yok.", style: TextStyle(color: Colors.grey[600])))
+                  ? Center(child: Text(appState.t('no_downloaded_songs'), style: TextStyle(color: Colors.grey[600])))
                   : _isEditing
                       ? ReorderableListView.builder(
                           buildDefaultDragHandles: false,
@@ -976,7 +1127,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
                               title: Text(song['title'], style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
                               subtitle: Text(song['author'], maxLines: 1),
                               trailing: const Icon(Icons.offline_pin, color: Color(0xFF1DB954), size: 20),
-                              onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
+                              onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index, playlistName: "downloaded_songs"),
                             );
                           },
                         ),
@@ -998,17 +1149,17 @@ class LibraryPage extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         children: [
           Row(
-            children: const [
-              CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.person, color: Colors.white)),
-              SizedBox(width: 16),
-              Text("Kütüphanen", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold))
+            children: [
+              const CircleAvatar(backgroundColor: Colors.grey, child: Icon(Icons.person, color: Colors.white)),
+              const SizedBox(width: 16),
+              Text(appState.t('your_library'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))
             ],
           ),
           const SizedBox(height: 24),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(width: 50, height: 50, color: Colors.grey[800], child: const Icon(Icons.add)),
-            title: const Text('Yeni Çalma Listesi Oluştur'),
+            title: Text(appState.t('create_new_playlist')),
             onTap: () {
               showDialog(
                 context: context,
@@ -1016,16 +1167,21 @@ class LibraryPage extends StatelessWidget {
                   final TextEditingController controller = TextEditingController();
                   return AlertDialog(
                     backgroundColor: Colors.grey[900],
-                    title: const Text('Yeni Çalma Listesi', style: TextStyle(color: Colors.white)),
-                    content: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
+                    title: Text(appState.t('new_playlist'), style: const TextStyle(color: Colors.white)),
+                    content: SafeArea(
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                        child: TextField(controller: controller, style: const TextStyle(color: Colors.white), autofocus: true),
+                      ),
+                    ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Iptal', style: TextStyle(color: Colors.grey))),
+                      TextButton(onPressed: () => Navigator.pop(context), child: Text(appState.t('cancel'), style: const TextStyle(color: Colors.grey))),
                       TextButton(
                         onPressed: () {
                           appState.createPlaylist(controller.text);
                           Navigator.pop(context);
                         },
-                        child: const Text('Oluştur', style: TextStyle(color: Color(0xFF1DB954))),
+                        child: Text(appState.t('create'), style: const TextStyle(color: Color(0xFF1DB954))),
                       )
                     ],
                   );
@@ -1036,8 +1192,8 @@ class LibraryPage extends StatelessWidget {
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Container(width: 50, height: 50, color: const Color(0xFF1DB954), child: const Icon(Icons.download_done, color: Colors.white)),
-            title: const Text('İndirilen Şarkılar'),
-            subtitle: Text('${appState.downloadedSongs.length} şarkı • Çevrimdışı hazır'),
+            title: Text(appState.t('downloaded_songs')),
+            subtitle: Text('${appState.downloadedSongs.length} ${appState.t('songs_offline_ready')}'),
             trailing: const Icon(Icons.chevron_right, color: Colors.grey),
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (context) => const DownloadedSongsPage()));
@@ -1051,7 +1207,7 @@ class LibraryPage extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
               leading: Container(width: 50, height: 50, color: Colors.grey[850], child: const Icon(Icons.queue_music, color: Colors.white)),
               title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('${entry.value.length} Şarkı'),
+              subtitle: Text('${entry.value.length} ${appState.t('songs_count')}'),
               trailing: const Icon(Icons.chevron_right, color: Colors.grey),
               onTap: () {
                 Navigator.push(context, MaterialPageRoute(builder: (context) => PlaylistDetailsPage(playlistName: entry.key)));
@@ -1099,21 +1255,22 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1DB954), foregroundColor: Colors.white),
                       icon: const Icon(Icons.play_arrow),
-                      label: const Text("Oynat"),
-                      onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context),
+                      label: Text(appState.t('play')),
+                      onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context, playlistName: widget.playlistName),
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], foregroundColor: Colors.white),
                       icon: const Icon(Icons.download),
-                      label: const Text("Tümünü İndir"),
+                      label: Text(appState.t('download_all')),
                       onPressed: allSongs.isEmpty ? null : () => appState.downloadAllFromPlaylist(widget.playlistName, context),
                     ),
                     const SizedBox(width: 8),
+                    // 🔥 Butonun adı Listeyi Sil olarak değişti
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
                       icon: const Icon(Icons.delete),
-                      label: const Text("Sil"),
+                      label: Text(appState.t('delete_playlist')),
                       onPressed: () {
                         appState.deletePlaylist(widget.playlistName);
                         Navigator.pop(context);
@@ -1126,7 +1283,7 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
             const Divider(color: Colors.grey),
             Expanded(
               child: allSongs.isEmpty
-                  ? Center(child: Text("Bu liste boş.", style: TextStyle(color: Colors.grey[600])))
+                  ? Center(child: Text(appState.t('playlist_empty'), style: TextStyle(color: Colors.grey[600])))
                   : _isEditing
                       ? ReorderableListView.builder(
                           buildDefaultDragHandles: false,
@@ -1181,7 +1338,7 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                                         icon: const Icon(Icons.download_for_offline_outlined, color: Colors.grey),
                                         onPressed: () => appState.downloadSpecificSong(song, context),
                                       ),
-                              onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index),
+                              onTap: () => appState.playPlaylist(allSongs, context: context, startIndex: index, playlistName: widget.playlistName),
                             );
                           },
                         ),
@@ -1207,7 +1364,7 @@ class PlayerScreen extends StatelessWidget {
     var appState = context.watch<MyAppState>();
     final song = appState.currentSong;
     if (song == null) {
-      return const Scaffold(body: Center(child: Text("Şarkı Yok")));
+      return Scaffold(body: Center(child: Text(appState.t('no_song'))));
     }
 
     return Scaffold(
@@ -1215,7 +1372,7 @@ class PlayerScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(icon: const Icon(Icons.keyboard_arrow_down, size: 32), onPressed: () => Navigator.pop(context)),
-        title: const Text("Şimdi Çalıyor", style: TextStyle(fontSize: 14, color: Colors.grey)),
+        title: Text(appState.t('now_playing'), style: const TextStyle(fontSize: 14, color: Colors.grey)),
         centerTitle: true,
       ),
       body: SafeArea(
