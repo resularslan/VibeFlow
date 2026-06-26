@@ -83,8 +83,19 @@ class MyAppState extends ChangeNotifier {
   int _queueIndex = 0;
   bool _isPlaying = false;
   
+  
   bool _isShuffle = false;
   bool _isRepeat = false;
+
+  bool _isPlaylistDownloading = false;
+  bool _cancelPlaylistDownload = false;
+  
+  bool get isPlaylistDownloading => _isPlaylistDownloading;
+
+  void cancelDownload() {
+    _cancelPlaylistDownload = true;
+    notifyListeners();
+  }
   
   Map<dynamic, dynamic>? _currentSong;
   List<int> _shuffledIndices = [];
@@ -258,6 +269,15 @@ class MyAppState extends ChangeNotifier {
   }
 
   void playSingleSong(dynamic video, {BuildContext? context}) {
+    // 🔥 KORUMA 1: Eğer tıklanan şarkı zaten şu an çalan şarkıysa, API isteği atma!
+    if (_currentSong != null && _currentSong!['id'] == video['id']) {
+      // Sadece Player ekranını aç ve işlemi kes
+      if (context != null && context.mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen()));
+      }
+      return; 
+    }
+
     final mapVideo = {
       'id': video['id'],
       'title': video['title'],
@@ -273,6 +293,18 @@ class MyAppState extends ChangeNotifier {
 
   void playPlaylist(List songs, {BuildContext? context, int? startIndex, String? playlistName}) {
     if (songs.isEmpty) return;
+
+    int targetIndex = startIndex ?? 0;
+    var targetSong = songs[targetIndex];
+
+    // 🔥 KORUMA 2: Eğer tıklanan şarkı zaten çalansa ve aynı listedeysek, API isteği atma!
+    if (_currentSong != null && _currentSong!['id'] == targetSong['id'] && _currentPlaylistName == playlistName) {
+      if (context != null && context.mounted) {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen()));
+      }
+      return;
+    }
+
     _currentPlaylistName = playlistName; 
     _queue = List<Map<dynamic, dynamic>>.from(songs);
 
@@ -518,17 +550,38 @@ class MyAppState extends ChangeNotifier {
 
   Future<void> downloadAllFromPlaylist(String playlistName, BuildContext context) async {
     List songs = _playlists[playlistName] ?? [];
-    if (songs.isEmpty) return;
+    // Eğer liste boşsa veya zaten bir indirme işlemi devam ediyorsa hiçbir şey yapma (Spam koruması)
+    if (songs.isEmpty || _isPlaylistDownloading) return; 
     
+    _isPlaylistDownloading = true;
+    _cancelPlaylistDownload = false;
+    notifyListeners();
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(t('playlist_download_started')), backgroundColor: const Color(0xFF1DB954)),
     );
 
     for (var song in songs) {
+      // 🔥 KULLANICI İPTAL ETTİ Mİ KONTROLÜ
+      if (_cancelPlaylistDownload) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("İndirme işlemi iptal edildi."), backgroundColor: Colors.orange),
+          );
+        }
+        break; // Döngüyü kır ve işlemi durdur
+      }
+
       if (!_downloadedSongs.any((s) => s['id'] == song['id'])) {
         await downloadSpecificSong(song, context);
+        await Future.delayed(const Duration(milliseconds: 1500)); // İnsani mola
       }
     }
+
+    // İşlem bittiğinde veya iptal edildiğinde durumları sıfırla
+    _isPlaylistDownloading = false;
+    _cancelPlaylistDownload = false;
+    notifyListeners();
   }
 
   Future<void> deleteDownloadedSong(String songId) async {
@@ -598,6 +651,7 @@ class AppTranslations {
       'no_downloaded_songs': 'Henüz indirilen şarkı yok.',
       'file_corrupted': 'Dosya bozuk.',
       'language_select': 'Dil',
+      'cancel_download': 'İptal Et',
     },
     'en': {
       'welcome': 'Welcome',
@@ -639,6 +693,7 @@ class AppTranslations {
       'no_downloaded_songs': 'No downloaded songs yet.',
       'file_corrupted': 'File is corrupted.',
       'language_select': 'Language',
+      'cancel_download': 'Cancel',
     }
   };
 
@@ -1054,6 +1109,7 @@ class _DownloadedSongsPageState extends State<DownloadedSongsPage> {
     var appState = context.watch<MyAppState>();
     List allSongs = appState.downloadedSongs;
 
+
     return Scaffold(
       appBar: AppBar(
         title: Text(appState.t('downloaded_songs')),
@@ -1229,6 +1285,10 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
     List allSongs = appState.playlists[widget.playlistName] ?? [];
+    // 🔥 Bütün şarkıların indirilip indirilmediğini kontrol eden mantık
+    bool isAllDownloaded = allSongs.isNotEmpty && allSongs.every((song) => 
+        appState.downloadedSongs.any((s) => s['id'] == song['id'])
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -1254,14 +1314,28 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                       onPressed: allSongs.isEmpty ? null : () => appState.playPlaylist(allSongs, context: context, playlistName: widget.playlistName),
                     ),
                     const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], foregroundColor: Colors.white),
-                      icon: const Icon(Icons.download),
-                      label: Text(appState.t('download_all')),
-                      onPressed: allSongs.isEmpty ? null : () => appState.downloadAllFromPlaylist(widget.playlistName, context),
-                    ),
+                    appState.isPlaylistDownloading
+                        ? ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                            icon: const Icon(Icons.cancel),
+                            label: Text(appState.t('cancel_download')),
+                            onPressed: () => appState.cancelDownload(),
+                          )
+                        : ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey[800], 
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.white.withValues(alpha: 0.05), // Gölgeli arka plan
+                              disabledForegroundColor: Colors.grey[600], // Gölgeli yazı ve ikon
+                            ),
+                            icon: const Icon(Icons.download),
+                            label: Text(appState.t('download_all')),
+                            // 🔥 Eğer liste boşsa veya hepsi indirilmişse butonu pasif (null) yap
+                            onPressed: (allSongs.isEmpty || isAllDownloaded) 
+                                ? null 
+                                : () => appState.downloadAllFromPlaylist(widget.playlistName, context),
+                          ),
                     const SizedBox(width: 8),
-                    // 🔥 Butonun adı Listeyi Sil olarak değişti
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 172, 25, 25), foregroundColor: Colors.white),
                       icon: const Icon(Icons.delete),
