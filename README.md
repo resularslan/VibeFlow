@@ -9,7 +9,8 @@ I started this project with zero prior knowledge of Flutter or Dart. The entire 
 * The overall lifecycle of client-side mobile application development.
 
 ### 📹 Video Demo:
-https://github.com/user-attachments/assets/a7fe14e3-3dfd-4596-8ee5-b191c2f24517
+![v1.0.0](demovideos/v1.0.0.mp4)
+![v1.0.1](demovideos/v1.0.1.mp4)
 
 ### 🔥 Key Engineering Highlights
 While this is a learning experiment, it implements several advanced architectural concepts:
