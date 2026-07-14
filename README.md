@@ -8,6 +8,9 @@ I started this project with zero prior knowledge of Flutter or Dart. The entire 
 * How to communicate effectively with AI to build a full, production-ready application.
 * The overall lifecycle of client-side mobile application development.
 
+### 📹 Video Demo:
+https://github.com/user-attachments/assets/a7fe14e3-3dfd-4596-8ee5-b191c2f24517
+
 ### 🔥 Key Engineering Highlights
 While this is a learning experiment, it implements several advanced architectural concepts:
 * **Zero-Latency Audio Prefetching:** A custom background algorithm that prepares the next track's data stream while the current song is playing, eliminating gap times.
