@@ -111,6 +111,27 @@ class MyAppState extends ChangeNotifier {
   bool get isRepeat => _isRepeat;
   Map<dynamic, dynamic>? get currentSong => _currentSong;
 
+  bool get hasNext {
+    if (_queue.isEmpty) return false;
+    if (_isRepeat) return true;
+    if (_isShuffle) return _shuffledPointer < _shuffledIndices.length - 1;
+    return _queueIndex < _queue.length - 1;
+  }
+
+  bool get hasPrevious {
+    if (_queue.isEmpty) return false;
+    if (_isRepeat) return true;
+    if (_isShuffle) return _shuffledPointer > 0;
+    return _queueIndex > 0;
+  }
+
+  bool get canShuffle => _queue.length > 1;
+  bool get canRepeat => _queue.length > 1;
+
+  bool _isMusicSearchMode = true; // Varsayılan olarak Müzik arayacak
+  bool get isMusicSearchMode => _isMusicSearchMode;
+  String _lastSearchQuery = ''; // Mod değiştiğinde aramayı yenilemek için
+
   MyAppState() {
     _initAudio();
     _loadData();
@@ -130,6 +151,17 @@ class MyAppState extends ChangeNotifier {
       _language = lang;
       _libraryBox.put('language', _language);
       notifyListeners();
+    }
+  }
+
+  void setSearchMode(bool isMusic) {
+    if (_isMusicSearchMode != isMusic) {
+      _isMusicSearchMode = isMusic;
+      notifyListeners();
+      // Eğer arama çubuğunda zaten bir yazı varsa, mod değişince otomatik yeniden arat
+      if (_lastSearchQuery.isNotEmpty) {
+        performSearch(_lastSearchQuery);
+      }
     }
   }
 
@@ -218,11 +250,14 @@ class MyAppState extends ChangeNotifier {
 
   Future<void> performSearch(String query) async {
     if (query.isEmpty) return;
+    
+    _lastSearchQuery = query; // Son aramayı kaydet
     _isSearching = true;
     notifyListeners();
 
     try {
-      _searchResults = await _musicService.searchMusic(query);
+      // isMusicMode parametresini api'ye iletiyoruz
+      _searchResults = await _musicService.searchMusic(query, isMusicMode: _isMusicSearchMode);
     } catch (e) {
       debugPrint("❌ Arama Hatası: $e");
       _searchResults = [];
@@ -248,6 +283,7 @@ class MyAppState extends ChangeNotifier {
   }
 
   void toggleShuffle() {
+    if (!canShuffle) return; // Güvenlik kilidi: Tek şarkıda çalışmaz
     _isShuffle = !_isShuffle;
     if (_isShuffle && _queue.isNotEmpty) {
       _shuffledIndices = List.generate(_queue.length, (i) => i)..shuffle();
@@ -263,15 +299,14 @@ class MyAppState extends ChangeNotifier {
   }
 
   void toggleRepeat() {
+    if (!canRepeat) return; // Güvenlik kilidi: Tek şarkıda çalışmaz
     _isRepeat = !_isRepeat;
     _preloadNextSong(); 
     notifyListeners();
   }
 
   void playSingleSong(dynamic video, {BuildContext? context}) {
-    // 🔥 KORUMA 1: Eğer tıklanan şarkı zaten şu an çalan şarkıysa, API isteği atma!
     if (_currentSong != null && _currentSong!['id'] == video['id']) {
-      // Sadece Player ekranını aç ve işlemi kes
       if (context != null && context.mounted) {
         Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen()));
       }
@@ -288,6 +323,11 @@ class MyAppState extends ChangeNotifier {
     _queue = [mapVideo];
     _queueIndex = 0;
     _currentPlaylistName = null; 
+    
+    // 🔥 Kuyrukta sadece 1 şarkı kalacağı için modları sıfırlıyoruz
+    _isShuffle = false;
+    _isRepeat = false;
+
     _playCurrentQueueItem(context: context);
   }
 
@@ -297,7 +337,6 @@ class MyAppState extends ChangeNotifier {
     int targetIndex = startIndex ?? 0;
     var targetSong = songs[targetIndex];
 
-    // 🔥 KORUMA 2: Eğer tıklanan şarkı zaten çalansa ve aynı listedeysek, API isteği atma!
     if (_currentSong != null && _currentSong!['id'] == targetSong['id'] && _currentPlaylistName == playlistName) {
       if (context != null && context.mounted) {
         Navigator.push(context, MaterialPageRoute(builder: (context) => const PlayerScreen()));
@@ -307,6 +346,12 @@ class MyAppState extends ChangeNotifier {
 
     _currentPlaylistName = playlistName; 
     _queue = List<Map<dynamic, dynamic>>.from(songs);
+
+    // 🔥 Eğer liste 1 şarkıdan oluşuyorsa modları sıfırlıyoruz
+    if (_queue.length <= 1) {
+      _isShuffle = false;
+      _isRepeat = false;
+    }
 
     if (_isShuffle) {
       _shuffledIndices = List.generate(_queue.length, (i) => i)..shuffle();
@@ -652,6 +697,8 @@ class AppTranslations {
       'file_corrupted': 'Dosya bozuk.',
       'language_select': 'Dil',
       'cancel_download': 'İptal Et',
+      'search_mode_music': 'Müzik',
+      'search_mode_general': 'Genel',
     },
     'en': {
       'welcome': 'Welcome',
@@ -694,6 +741,8 @@ class AppTranslations {
       'file_corrupted': 'File is corrupted.',
       'language_select': 'Language',
       'cancel_download': 'Cancel',
+      'search_mode_music': 'Music',
+      'search_mode_general': 'General',
     }
   };
 
@@ -910,6 +959,37 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
             const SizedBox(height: 24),
+            const SizedBox(height: 16),
+            
+            // 🔥 YENİ EKLENEN SEÇENEK BUTONLARI
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<bool>(
+                segments: [
+                  ButtonSegment<bool>(
+                    value: true, 
+                    label: Text(appState.t('search_mode_music')),
+                    icon: const Icon(Icons.music_note)
+                  ),
+                  ButtonSegment<bool>(
+                    value: false, 
+                    label: Text(appState.t('search_mode_general')),
+                    icon: const Icon(Icons.video_library)
+                  ),
+                ],
+                selected: {appState.isMusicSearchMode},
+                onSelectionChanged: (Set<bool> newSelection) {
+                  appState.setSearchMode(newSelection.first);
+                },
+                style: SegmentedButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.05),
+                  selectedBackgroundColor: const Color(0xFF1DB954).withValues(alpha: 0.2),
+                  selectedForegroundColor: const Color(0xFF1DB954),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 16),
             Expanded(
               child: _searchController.text.isEmpty
                   ? Column(
@@ -1450,7 +1530,22 @@ class PlayerScreen extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(song['thumbnail'] ?? '', width: MediaQuery.of(context).size.width - 48, height: MediaQuery.of(context).size.width - 48, fit: BoxFit.cover)),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  child: AspectRatio(
+                    aspectRatio: 1.0, // Fotoğrafın her zaman kare kalmasını sağlar
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        song['thumbnail'] ?? '', 
+                        fit: BoxFit.cover,
+                        errorBuilder: (c, e, s) => const Icon(Icons.music_note, color: Colors.grey, size: 64),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 32),
               Text(song['title'] ?? '', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white), maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 8),
@@ -1498,18 +1593,44 @@ class PlayerScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
+                  // Karışık Çal (Shuffle) Butonu
                   IconButton(
                     iconSize: 28, 
-                    icon: Icon(Icons.shuffle, color: appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey), 
-                    onPressed: () => appState.toggleShuffle()
+                    icon: Icon(
+                      Icons.shuffle, 
+                      color: appState.canShuffle 
+                          ? (appState.isShuffle ? const Color(0xFF1DB954) : Colors.grey)
+                          : Colors.grey.withValues(alpha: 0.3), // Tek şarkı varsa sönük görünür
+                    ), 
+                    onPressed: appState.canShuffle ? () => appState.toggleShuffle() : null, // Tek şarkı varsa basılamaz (null)
                   ),
-                  IconButton(iconSize: 48, icon: const Icon(Icons.skip_previous, color: Colors.white), onPressed: () => appState.playPrevious()),
-                  IconButton(iconSize: 64, icon: Icon(appState.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white), onPressed: () => appState.togglePlay()),
-                  IconButton(iconSize: 48, icon: const Icon(Icons.skip_next, color: Colors.white), onPressed: () => appState.playNext()),
+                  // Geri Butonu
+                  IconButton(
+                    iconSize: 48, 
+                    icon: Icon(Icons.skip_previous, color: appState.hasPrevious ? Colors.white : Colors.white.withValues(alpha: 0.3)), 
+                    onPressed: appState.hasPrevious ? () => appState.playPrevious() : null
+                  ),
+                  IconButton(
+                    iconSize: 64, 
+                    icon: Icon(appState.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white), 
+                    onPressed: () => appState.togglePlay()
+                  ),
+                  // İleri Butonu
+                  IconButton(
+                    iconSize: 48, 
+                    icon: Icon(Icons.skip_next, color: appState.hasNext ? Colors.white : Colors.white.withValues(alpha: 0.3)), 
+                    onPressed: appState.hasNext ? () => appState.playNext() : null
+                  ),
+                  // Tekrarla (Repeat) Butonu
                   IconButton(
                     iconSize: 28, 
-                    icon: Icon(appState.isRepeat ? Icons.repeat_one : Icons.repeat, color: appState.isRepeat ? const Color(0xFF1DB954) : Colors.grey), 
-                    onPressed: () => appState.toggleRepeat()
+                    icon: Icon(
+                      appState.isRepeat ? Icons.repeat_one : Icons.repeat, 
+                      color: appState.canRepeat 
+                          ? (appState.isRepeat ? const Color(0xFF1DB954) : Colors.grey)
+                          : Colors.grey.withValues(alpha: 0.3), // Tek şarkı varsa sönük görünür
+                    ), 
+                    onPressed: appState.canRepeat ? () => appState.toggleRepeat() : null, // Tek şarkı varsa basılamaz (null)
                   ),
                 ],
               ),

@@ -20,7 +20,7 @@ While this is a learning experiment, it implements several advanced architectura
 * **Framework:** Flutter (Dart)
 * **Audio Engine:** `just_audio` & `just_audio_background`
 * **API Wrappers:** * `ytmusicapi_dart` (InnerTube search & metadata integration)
-  * `youtube_explode_dart` (Direct audio stream extraction)
+  * `youtube_explode_dart` (Direct audio stream extraction & InnerTube search & metadata integration)
 * **State Management:** Provider (Centralized app state & event system)
 * **Local Storage:** Hive (NoSQL local caching) & `path_provider` (Native file system access for offline downloads)
 * **Development Approach:** AI-Assisted "Vibe Coding"
