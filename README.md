@@ -8,9 +8,11 @@ I started this project with zero prior knowledge of Flutter or Dart. The entire 
 * How to communicate effectively with AI to build a full, production-ready application.
 * The overall lifecycle of client-side mobile application development.
 
-### 📹 Video Demo:
-![v1.0.0](https://github.com/user-attachments/assets/acde7b3d-ad66-4976-8713-62ce8fc5e45a)
-![v1.0.1](https://github.com/user-attachments/assets/8589d2e9-a3b1-4ebf-a4d2-e62dcc6c5746)
+### 📹 Video Demos:
+### v1.0.0:
+https://github.com/user-attachments/assets/acde7b3d-ad66-4976-8713-62ce8fc5e45a
+### v1.0.1:
+https://github.com/user-attachments/assets/8589d2e9-a3b1-4ebf-a4d2-e62dcc6c5746
 
 ### 🔥 Key Engineering Highlights
 While this is a learning experiment, it implements several advanced architectural concepts:
